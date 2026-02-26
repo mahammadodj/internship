@@ -653,12 +653,17 @@ async def decline_curve_analysis(
             except Exception:
                 equation = ""
 
-        # Forecast — monthly intervals (starting 1 month after last data)
+        # Forecast — monthly intervals (starting 1 month after last INCLUDED data)
         # Initialize as empty dict so w.forecast.x checks works safely
         forecast_data = {}
         if params and f_months > 0:
             func = _MODELS[model][0]
-            last_t = t[-1]
+            # Use the last *included* point as forecast origin (not the last overall point)
+            if excl:
+                non_excl_idx = sorted(set(range(len(t))) - excl)
+                last_t = t[non_excl_idx[-1]] if non_excl_idx else t[-1]
+            else:
+                last_t = t[-1]
             n_months = int(f_months)
             # Roughly 30.44 days per month for basic forecast stepping
             t_forecast = np.array([last_t + 30.4375 * (i + 1) for i in range(n_months)])
