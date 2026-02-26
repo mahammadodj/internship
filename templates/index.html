@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DCA Pro – Decline Curve Analysis</title>
+  <script src="/static/echarts.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo"><svg viewBox="0 0 24 24">
+        <path
+          d="M12 2C9.5 2 8 4 8 6c0 2.5 2 4 2 7h4c0-3 2-4.5 2-7 0-2-1.5-4-4-4zM9 15v1c0 1 .5 2 1.5 2.5L10 22h4l-.5-3.5C14.5 18 15 17 15 16v-1H9z" />
+      </svg></div>
+    <div class="brand">
+      <span class="brand-name">DCA Pro</span>
+      <span class="brand-tag">Decline Curve Analysis Platform</span>
+    </div>
+    <div class="header-right">
+      <span id="headerStatus">No dataset loaded</span>
+      <button class="header-btn" onclick="saveWorkspace()" title="Save workspace to browser">💾 Save</button>
+      <button class="header-btn" onclick="loadWorkspace()" title="Restore workspace from browser">📂 Load</button>
+      <button class="header-btn" onclick="saveWorkspaceToFile()" title="Export workspace to file">📤</button>
+      <button class="header-btn" onclick="loadWorkspaceFromFile()" title="Import workspace from file">📥</button>
+      <button id="themeToggle" class="header-btn">☀️ Light</button>
+    </div>
+  </header>
+
+  <!-- Main Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="import">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M3 14h10M8 2v9M5 8l3 3 3-3" />
+      </svg>
+      Import Data
+    </button>
+    <button class="tab-btn" data-tab="editor">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M2 3h12M2 7h12M2 11h8" />
+      </svg>
+      Data Editor
+    </button>
+    <button class="tab-btn" data-tab="dca">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M2 14L6 6l4 5 4-9" />
+      </svg>
+      Decline Curve Analysis
+    </button>
+  </div>
+
+  <!-- TAB 1: Import -->
+  <div id="tab-import" class="tab-content active">
+    <div class="card">
+      <div class="card-title"><span class="dot"></span> Data Import</div>
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" />
+        <div class="upload-icon">
+          <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+        </div>
+        <h3>Drop production data file or click to browse</h3>
+        <p>Supports <strong>.csv</strong> and <strong>.xlsx</strong> formats</p>
+      </div>
+      <div class="file-info" id="fileInfo"></div>
+      <div class="upload-progress" id="uploadProgressWrap" style="display:none;">
+        <div class="upload-progress-header">
+          <span id="uploadProgressText">0%</span>
+        </div>
+        <div class="upload-progress-track">
+          <div class="upload-progress-bar" id="uploadProgressBar" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Sync Control Panel -->
+      <div class="sync-panel" id="syncPanel" style="display:none;">
+        <div class="sync-panel-header">
+          <span class="dot"></span>
+          <span class="sync-title">Pipeline Sync</span>
+          <span class="sync-timestamp" id="syncTimestamp"></span>
+        </div>
+        <div class="sync-controls">
+          <div class="sync-mode-selector">
+            <label class="sync-radio"><input type="radio" name="syncMode" value="manual" checked
+                onchange="setSyncMode('manual')"><span class="sync-radio-label">Manual Build</span></label>
+            <label class="sync-radio"><input type="radio" name="syncMode" value="auto"
+                onchange="setSyncMode('auto')"><span class="sync-radio-label">On-Change (Auto)</span></label>
+            <label class="sync-radio"><input type="radio" name="syncMode" value="scheduled"
+                onchange="setSyncMode('scheduled')"><span class="sync-radio-label">Scheduled</span></label>
+          </div>
+          <div class="sync-schedule-config" id="syncScheduleConfig" style="display:none;">
+            <label>Every</label>
+            <select id="syncIntervalSelect" onchange="updateSyncSchedule()">
+              <option value="60000">1 min</option>
+              <option value="300000">5 min</option>
+              <option value="600000" selected>10 min</option>
+              <option value="1800000">30 min</option>
+              <option value="3600000">60 min</option>
+            </select>
+          </div>
+          <div class="sync-actions">
+            <button class="btn btn-sm sync-build-btn" id="syncBuildBtn" onclick="triggerManualBuild()"
+              title="Force rebuild from local file">⚡ Build</button>
+
+            <button class="btn btn-sm btn-outline" onclick="showVersionPanel()" title="Version history">📋
+              Versions</button>
+          </div>
+        </div>
+        <div class="sync-status-bar" id="syncStatusBar">
+          <span class="sync-status-indicator" id="syncStatusIndicator">●</span>
+          <span id="syncStatusText">Idle</span>
+          <span class="sync-version-badge" id="syncVersionBadge"></span>
+        </div>
+        <div class="sync-progress" id="syncProgressWrap" style="display:none;">
+          <div class="sync-progress-track">
+            <div class="sync-progress-bar" id="syncProgressBar" style="width:0%"></div>
+          </div>
+          <span class="sync-progress-text" id="syncProgressText">Syncing…</span>
+        </div>
+      </div>
+
+
+    </div>
+    <div class="card foundry-preview" id="previewCard" style="display:none">
+      <!-- Foundry-style toolbar -->
+      <div class="foundry-toolbar">
+        <div class="foundry-toolbar-left">
+          <span class="dot"></span>
+          <span class="foundry-title">Data Preview</span>
+          <span class="foundry-row-count" id="previewNote"></span>
+        </div>
+        <div class="foundry-toolbar-right">
+          <div class="foundry-view-toggle">
+            <button class="foundry-toggle-btn active" id="btnViewTable" onclick="switchPreviewView('table')">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 2a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H2a2 2 0 01-2-2V2zm1 2v10h14V4H1z" />
+                <path d="M5 0v16M11 0v16M0 8h16" />
+              </svg>
+              Table
+            </button>
+            <button class="foundry-toggle-btn" id="btnViewStats" onclick="switchPreviewView('stats')">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M4 11h2v4H4zM7 7h2v8H7zM10 3h2v12h-2zM1 15h14" />
+              </svg>
+              Stats
+            </button>
+          </div>
+          <div class="foundry-search">
+            <input type="text" id="previewSearchInput" placeholder="Search columns…"
+              oninput="onPreviewSearch(this.value)">
+          </div>
+        </div>
+      </div>
+      <!-- Virtual-scroll table view -->
+      <div class="foundry-table-view" id="foundryTableView">
+        <div class="foundry-vscroll-container" id="vscrollContainer">
+          <div class="foundry-vscroll-spacer" id="vscrollSpacer"></div>
+          <table class="foundry-table" id="vscrollTable">
+            <thead id="vscrollHead"></thead>
+            <tbody id="vscrollBody"></tbody>
+          </table>
+        </div>
+        <div class="foundry-status-bar" id="foundryStatusBar">
+          <span id="foundryRowInfo">0 rows</span>
+          <span id="foundryColInfo">0 columns</span>
+        </div>
+      </div>
+      <!-- Stats view -->
+      <div class="foundry-stats-view" id="foundryStatsView" style="display:none;">
+        <div class="foundry-stats-grid" id="foundryStatsGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: Data Editor -->
+  <div id="tab-editor" class="tab-content">
+    <div class="card">
+      <div class="card-title">
+        <span class="dot"></span> Data Editor
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <button class="btn btn-outline btn-sm" onclick="showAddColumnModal()">+ Add Column</button>
+          <button class="btn btn-outline btn-sm" onclick="showDeleteColumnModal()">− Delete Column</button>
+          <button class="btn btn-outline btn-sm" onclick="exportCSV()">↓ Export CSV</button>
+        </div>
+      </div>
+      <div id="editorTableWrap" class="table-wrap" style="max-height:600px;"></div>
+      <div class="pagination" id="editorPagination"></div>
+    </div>
+  </div>
+
+  <!-- TAB 3: DCA -->
+  <div id="tab-dca" class="tab-content">
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-title"><span class="dot"></span> Dataset Columns</div>
+      <div class="controls">
+        <div class="control-group"><label>Time / X Axis</label><select id="selX">
+            <option value="">— load data —</option>
+          </select></div>
+        <div class="control-group"><label>Rate / Y Axis</label><select id="selY">
+            <option value="">— load data —</option>
+          </select></div>
+        <div class="control-group"><label>Well Name Column</label><select id="selWellCol">
+            <option value="">— load data —</option>
+          </select></div>
+      </div>
+    </div>
+    <div class="page-bar" id="pageBar">
+      <div class="page-tabs" id="pageTabs"></div>
+      <button class="page-add" onclick="addPagePrompt()" title="New Page">+</button>
+    </div>
+    <div id="plotsContainer"></div>
+    <div class="add-plot-btn" onclick="addPlotCardToActive()"><span>+ Add Well Forecast</span></div>
+  </div>
+
+  <!-- Zoom context menu -->
+  <div class="zoom-menu" id="zoomMenu">
+    <div class="zoom-menu-item" data-action="box">Zoom to Selection</div>
+    <div class="zoom-menu-item" data-action="x">Zoom X Axis Only</div>
+    <div class="zoom-menu-item" data-action="y">Zoom Y Axis Only</div>
+    <div class="zoom-menu-divider"></div>
+    <div class="zoom-menu-item" data-action="fitsel">Fit Curve to Selection</div>
+    <div class="zoom-menu-item" data-action="exclsel">Exclude Selection</div>
+    <div class="zoom-menu-divider"></div>
+    <div class="zoom-menu-item" data-action="reset">Reset Zoom</div>
+  </div>
+
+  <!-- Modal container -->
+  <div id="modalContainer"></div>
+
+  <!-- Column Header Menu -->
+  <div class="header-menu" id="headerMenu">
+    <div class="header-menu-item" style="cursor:default;font-weight:600;color:var(--text-muted);pointer-events:none;"
+      id="hmTitle">Column</div>
+    <div class="header-menu-divider"></div>
+    <div class="header-menu-item" data-action="sort-asc">Sort Ascending</div>
+    <div class="header-menu-item" data-action="sort-desc">Sort Descending</div>
+    <div class="header-menu-divider"></div>
+    <div class="header-menu-item" style="flex-direction:column;align-items:stretch;cursor:default;">
+      <span style="font-size:0.75rem;color:var(--text-dim);">Filter:</span>
+      <input type="text" id="hmFilterInput" placeholder="Filter value..." onclick="event.stopPropagation()">
+    </div>
+    <div class="header-menu-divider"></div>
+    <div class="header-menu-item" data-action="copy">Copy Values</div>
+    <div class="header-menu-item" data-action="remove" style="color:var(--red);">Remove Column</div>
+  </div>
+
+  <!-- Chart Right-Click Context Menu -->
+  <div class="custom-context-menu" id="chartCtxMenu">
+    <div class="ccm-item" data-action="add-hline"><span class="ccm-icon">─</span> Add Horizontal Line</div>
+    <div class="ccm-item" data-action="add-vline"><span class="ccm-icon">│</span> Add Vertical Line</div>
+    <div class="ccm-divider"></div>
+    <div class="ccm-item" data-action="add-annotation"><span class="ccm-icon">T</span> Add Annotation</div>
+    <div class="ccm-divider"></div>
+    <div class="ccm-item ccm-has-sub"><span class="ccm-icon">⊡</span> Data Labels <span class="ccm-arrow">▸</span>
+      <div class="ccm-submenu">
+        <div class="ccm-item ccm-label-opt" data-pos="none">✓ None</div>
+        <div class="ccm-item ccm-label-opt" data-pos="top">　Top</div>
+        <div class="ccm-item ccm-label-opt" data-pos="bottom">　Bottom</div>
+        <div class="ccm-item ccm-label-opt" data-pos="left">　Left</div>
+        <div class="ccm-item ccm-label-opt" data-pos="right">　Right</div>
+      </div>
+    </div>
+    <div class="ccm-divider"></div>
+    <div class="ccm-item" data-action="pct-change"><span class="ccm-icon">Δ</span> Show % Change &amp; Diff</div>
+    <div class="ccm-divider"></div>
+    <div class="ccm-item" data-action="log-scale"><span class="ccm-icon">㏒</span> Y-Axis Log Scale</div>
+  </div>
+
+  <!-- Line Color Picker Popup -->
+  <div class="ccm-popup" id="lineColorPopup">
+    <div class="ccm-popup-title">Line Color</div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="color" id="lineColorInput" value="#ff0000">
+      <button class="btn btn-sm" id="lineColorOk" style="padding:3px 10px;">Apply</button>
+      <button class="btn btn-outline btn-sm" id="lineColorDel"
+        style="padding:3px 10px;color:var(--red);border-color:var(--red);">Delete</button>
+    </div>
+  </div>
+
+  <!-- Annotation Edit Popup -->
+  <div class="ccm-popup" id="annotationPopup">
+    <div class="ccm-popup-title">Edit Annotation</div>
+    <div style="margin-bottom:6px;">
+      <input type="text" id="annotText" placeholder="Annotation text"
+        style="width:100%;padding:5px 8px;font-size:.8rem;border:1px solid var(--border);background:var(--bg-input);color:var(--text);border-radius:4px;">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <span style="font-size:.72rem;color:var(--text-muted);white-space:nowrap;">Font Size:</span>
+      <input type="range" id="annotFontSize" min="8" max="32" value="12" style="flex:1;">
+      <span id="annotFontSizeVal" style="font-size:.72rem;color:var(--text-dim);width:20px;">12</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <span style="font-size:.72rem;color:var(--text-muted);white-space:nowrap;">Text Color:</span>
+      <input type="color" id="annotColor" value="#000000"
+        style="flex:1;height:24px;padding:0;border:1px solid var(--border);background:transparent;cursor:pointer;">
+    </div>
+    <div style="display:flex;gap:6px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="annotDel"
+        style="padding:3px 10px;color:var(--red);border-color:var(--red);">Delete</button>
+      <button class="btn btn-sm" id="annotOk" style="padding:3px 10px;">OK</button>
+    </div>
+  </div>
+
+  <!-- Axis Label Edit Input -->
+  <input type="text" id="axisLabelInput" class="axis-label-input" style="display:none;" placeholder="Enter axis label">
+
+  <!-- Axis Hover Toolbar -->
+  <div id="axisHoverToolbar" class="axis-toolbar">
+    <button class="axis-tb-btn" data-action="zoom-in" title="Zoom in">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    </button>
+    <button class="axis-tb-btn" data-action="zoom-out" title="Zoom out">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    </button>
+    <button class="axis-tb-btn" data-action="fit" title="Fit to frame">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="4 14 4 20 10 20" />
+        <polyline points="20 10 20 4 14 4" />
+        <line x1="14" y1="10" x2="21" y2="3" />
+        <line x1="3" y1="21" x2="10" y2="14" />
+      </svg>
+    </button>
+    <button class="axis-tb-btn" data-action="range" title="Apply value range">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3" />
+        <path
+          d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+      </svg>
+    </button>
+    <div class="axis-tb-sep"></div>
+    <button class="axis-tb-btn" data-action="move" title="Move axis to opposite side">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="5" y1="12" x2="19" y2="12" />
+        <polyline points="12 5 19 12 12 19" />
+      </svg>
+    </button>
+  </div>
+
+  <!-- Axis Range Popup -->
+  <div id="axisRangePopup" class="ccm-popup" style="display:none;">
+    <div class="ccm-popup-title">Set Axis Range</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <label style="font-size:.78rem;color:var(--text-muted);white-space:nowrap;">Min:</label>
+      <input type="number" id="axisRangeMin"
+        style="flex:1;padding:4px 8px;font-size:.82rem;border:1px solid var(--border);background:var(--bg-input);color:var(--text);border-radius:4px;width:80px;"
+        step="any">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <label style="font-size:.78rem;color:var(--text-muted);white-space:nowrap;">Max:</label>
+      <input type="number" id="axisRangeMax"
+        style="flex:1;padding:4px 8px;font-size:.82rem;border:1px solid var(--border);background:var(--bg-input);color:var(--text);border-radius:4px;width:80px;"
+        step="any">
+    </div>
+    <div style="display:flex;gap:6px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="axisRangeReset" style="padding:3px 10px;">Auto</button>
+      <button class="btn btn-sm" id="axisRangeOk" style="padding:3px 10px;">Apply</button>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>

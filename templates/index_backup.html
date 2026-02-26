@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DCA Pro – Decline Curve Analysis</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    /* ============================================================
+       INDUSTRIAL DARK THEME – Oil & Gas Professional
+       ============================================================ */
+    :root {
+      /* Dark Theme (Default) */
+      --bg-dark:    #0f1117;
+      --bg-panel:   #1a1d27;
+      --bg-card:    #222533;
+      --bg-input:   #2a2e3d;
+      --border:     #333750;
+      --accent:     #f59e0b;
+      --accent-dim: #b45309;
+      --accent-bg:  rgba(245,158,11,.08);
+      --green:      #22c55e;
+      --red:        #ef4444;
+      --text:       #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-dim:   #64748b;
+      --radius:     6px;
+      --shadow:     0 2px 12px rgba(0,0,0,.35);
+    }
+    
+    [data-theme="light"] {
+      --bg-dark:    #f1f5f9;
+      --bg-panel:   #ffffff;
+      --bg-card:    #ffffff;
+      --bg-input:   #f8fafc;
+      --border:     #e2e8f0;
+      --accent:     #0284c7; /* Blue for light mode */
+      --accent-dim: #0369a1;
+      --accent-bg:  rgba(2,132,199,.1);
+      --green:      #16a34a;
+      --red:        #dc2626;
+      --text:       #0f172a;
+      --text-muted: #475569;
+      --text-dim:   #64748b;
+      --shadow:     0 2px 12px rgba(0,0,0,.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text);
+      min-height: 100vh;
+      transition: background .3s, color .3s;
+    }
+
+    /* ---- Header ---- */
+    header {
+      display: flex; align-items: center; gap: 14px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+    }
+    .logo {
+      width: 38px; height: 38px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo svg { width: 22px; height: 22px; fill: #0f1117; }
+    .brand { display: flex; flex-direction: column; }
+    .brand-name { font-size: 1.15rem; font-weight: 700; letter-spacing: .5px; color: #fff; }
+    .brand-tag  { font-size: .7rem; color: var(--text-muted); letter-spacing: 1.2px; text-transform: uppercase; }
+    .header-right { margin-left: auto; font-size: .75rem; color: var(--text-dim); }
+
+    /* ---- Tabs ---- */
+    .tab-bar {
+      display: flex; gap: 0;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+      padding: 0 28px;
+    }
+    .tab-btn {
+      padding: 13px 26px;
+      cursor: pointer; border: none; background: transparent;
+      font-size: .88rem; font-weight: 500;
+      color: var(--text-dim);
+      border-bottom: 2px solid transparent;
+      transition: .2s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-btn .badge {
+      font-size: .65rem; padding: 1px 7px; border-radius: 10px;
+      background: var(--accent-bg); color: var(--accent);
+    }
+
+    .tab-content { display: none; padding: 24px 28px; }
+    .tab-content.active { display: block; }
+
+    /* ---- Cards ---- */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+    .card-title {
+      font-size: .82rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .8px; color: var(--text-muted); margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+
+    /* ---- Upload ---- */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 44px;
+      text-align: center;
+      cursor: pointer;
+      transition: .2s;
+      position: relative;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+    .upload-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    }
+    .upload-icon {
+      width: 52px; height: 52px; margin: 0 auto 12px;
+      background: var(--bg-input); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .upload-icon svg { width: 24px; height: 24px; stroke: var(--accent); fill: none; }
+    .upload-zone h3 { font-size: 1rem; margin-bottom: 4px; color: var(--text); }
+    .upload-zone p  { color: var(--text-dim); font-size: .8rem; }
+
+    .file-info {
+      margin-top: 14px; padding: 12px 16px;
+      background: rgba(34,197,94,.08); border: 1px solid rgba(34,197,94,.25);
+      border-radius: var(--radius); font-size: .85rem; color: var(--green);
+      display: none;
+    }
+    .file-info.show { display: flex; align-items: center; gap: 8px; }
+    .file-info.error { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.25); color: var(--red); }
+
+    /* ---- Table ---- */
+    .table-wrap { overflow: auto; max-height: 400px; margin-top: 14px; border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+    th, td {
+      text-align: left; padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    th {
+      position: sticky; top: 0; z-index: 2;
+      background: var(--bg-input); font-weight: 600;
+      color: var(--accent); text-transform: uppercase; font-size: .7rem; letter-spacing: .5px;
+    }
+    tr:hover td { background: rgba(245,158,11,.03); }
+
+    /* ---- Controls ---- */
+    .controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+    .control-group { display: flex; flex-direction: column; gap: 5px; }
+    .control-group label {
+      font-size: .72rem; font-weight: 600; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+    select, button.btn, input[type="text"] {
+      padding: 9px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: .84rem;
+      color: var(--text);
+      background: var(--bg-input);
+      transition: .15s;
+    }
+    select { min-width: 170px; cursor: pointer; }
+    select:focus, input:focus { outline: none; border-color: var(--accent); }
+    select option { background: var(--bg-card); color: var(--text); }
+
+    button.btn {
+      background: var(--accent); color: #0f1117;
+      border: none; cursor: pointer; font-weight: 600;
+      padding: 9px 22px; letter-spacing: .3px;
+    }
+    button.btn:hover { background: #fbbf24; }
+    button.btn:disabled { opacity: .4; cursor: not-allowed; }
+    button.btn-outline {
+      background: transparent; color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+    button.btn-outline:hover { background: var(--accent-bg); }
+
+    /* ---- Well selector chips ---- */
+    .well-selector {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      max-height: 140px; overflow-y: auto;
+      padding: 8px; background: var(--bg-input);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      min-width: 260px;
+    }
+    .well-chip {
+      padding: 4px 12px; border-radius: 14px;
+      font-size: .76rem; font-weight: 500;
+      background: var(--bg-card); border: 1px solid var(--border);
+      cursor: pointer; transition: .15s; user-select: none;
+    }
+    .well-chip:hover { border-color: var(--accent); }
+    .well-chip.selected {
+      background: var(--accent); color: #0f1117;
+      border-color: var(--accent);
+    }
+    .well-actions { display: flex; gap: 6px; margin-top: 4px; }
+    .well-actions button {
+      font-size: .7rem; padding: 2px 10px;
+      border-radius: 4px; cursor: pointer;
+      background: transparent; border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+    .well-actions button:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ---- Chart ---- */
+    #chart { width: 100%; height: 540px; }
+
+    /* ---- Params table ---- */
+    .params-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px; margin-top: 14px;
+    }
+    .param-card {
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+    }
+    .param-card h4 {
+      font-size: .8rem; color: var(--accent);
+      margin-bottom: 6px; font-weight: 600;
+    }
+    .param-card .param-row {
+      display: flex; justify-content: space-between;
+      font-size: .78rem; padding: 2px 0;
+    }
+    .param-card .param-row span:first-child { color: var(--text-dim); }
+    .param-card .param-row span:last-child  { font-weight: 600; font-family: 'Cascadia Code', 'Consolas', monospace; }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--text-dim); }
+    .empty-state h3 { margin-bottom: 6px; color: var(--text-muted); }
+
+    /* ---- Loader ---- */
+    .loader {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid var(--accent); border-top-color: transparent;
+      border-radius: 50%; animation: spin .6s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- Scrollbar ---- */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-panel); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+  </style>
+</head>
+<body>
+
+<!-- ================ Header ================ -->
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24"><path d="M12 2C9.5 2 8 4 8 6c0 2.5 2 4 2 7h4c0-3 2-4.5 2-7 0-2-1.5-4-4-4zM9 15v1c0 1 .5 2 1.5 2.5L10 22h4l-.5-3.5C14.5 18 15 17 15 16v-1H9z"/></svg>
+  </div>
+  <div class="brand">
+    <span class="brand-name">DCA Pro</span>
+    <span class="brand-tag">Decline Curve Analysis Platform</span>
+  </div>
+  <div class="header-right" id="headerStatus">No dataset loaded</div>
+  <button id="themeToggle" class="btn-outline" style="margin-left:14px; padding:6px 12px; font-size:.7rem;">
+    🌙 Dark
+  </button>
+</header>
+
+<!-- ================ Tab bar ================ -->
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="import">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 14h10M8 2v9M5 8l3 3 3-3"/></svg>
+    Import Data
+  </button>
+  <button class="tab-btn" data-tab="dca">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 14L6 6l4 5 4-9"/></svg>
+    Decline Curve Analysis
+  </button>
+</div>
+
+<!-- ============== TAB 1: Import ============== -->
+<div id="tab-import" class="tab-content active">
+  <div class="card">
+    <div class="card-title"><span class="dot"></span> Data Import</div>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" />
+      <div class="upload-icon">
+        <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <h3>Drop production data file or click to browse</h3>
+      <p>Supports <strong>.csv</strong> and <strong>.xlsx</strong> formats</p>
+    </div>
+    <div class="file-info" id="fileInfo"></div>
+  </div>
+
+  <div class="card" id="previewCard" style="display:none">
+    <div class="card-title"><span class="dot"></span> Data Preview <span id="previewNote" style="font-weight:400;color:var(--text-dim);font-size:.75rem;margin-left:8px;"></span></div>
+    <div class="table-wrap" id="tableWrap"></div>
+  </div>
+</div>
+
+<!-- ============== TAB 2: DCA ============== -->
+<div id="tab-dca" class="tab-content">
+  <!-- Dataset setup -->
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-title"><span class="dot"></span> Dataset Columns</div>
+    <div class="controls">
+      <div class="control-group">
+        <label>Time / X Axis</label>
+        <select id="selX"><option value="">— load data —</option></select>
+      </div>
+      <div class="control-group">
+        <label>Rate / Y Axis</label>
+        <select id="selY"><option value="">— load data —</option></select>
+      </div>
+      <div class="control-group">
+        <label>Well Name Column</label>
+        <select id="selWellCol"><option value="">— load data —</option></select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Plots container -->
+  <div id="plotsContainer"></div>
+
+  <!-- Add Plot Button -->
+  <div class="add-plot-btn" id="btnAddPlot">
+    <span>+ Add Well Forecast</span>
+  </div>
+</div>
+
+<style>
+.plot-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow);
+    position: relative;
+    animation: fadeIn .4s ease;
+}
+@keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+.plot-header {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px; margin-bottom: 16px;
+}
+.plot-remove {
+    position: absolute; top: 16px; right: 16px;
+    background: transparent; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 1.2rem; line-height: 1;
+}
+.plot-remove:hover { color: var(--red); }
+
+.mini-chart { width: 100%; height: 380px; }
+
+.param-display {
+    display: flex; gap: 20px; background: var(--bg-input);
+    padding: 10px 16px; border-radius: var(--radius);
+    font-size: .8rem; color: var(--text-dim);
+    margin-top: 12px;
+}
+.param-display strong { color: var(--accent); margin-right: 4px; }
+
+.add-plot-btn {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 24px; text-align: center;
+    cursor: pointer; color: var(--text-muted);
+    font-weight: 600; font-size: .95rem;
+    transition: .2s;
+}
+.add-plot-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-bg);
+}
+
+/* ---- Selection overlay ---- */
+.select-overlay {
+    position: absolute;
+    border: 2px dashed var(--accent);
+    background: rgba(245, 158, 11, 0.08);
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* ---- Zoom context menu ---- */
+.zoom-menu {
+    position: fixed;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+    padding: 4px 0;
+    z-index: 1000;
+    min-width: 170px;
+    display: none;
+}
+.zoom-menu.show { display: block; }
+.zoom-menu-item {
+    padding: 9px 16px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: 0.15s;
+}
+.zoom-menu-item:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+}
+.zoom-menu-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+}
+
+/* ---- Chart area positioning for overlays ---- */
+.chart-area { position: relative; }
+.mini-chart { position: relative; }
+
+/* ---- Reset zoom button ---- */
+.reset-zoom-btn {
+    position: absolute; top: 8px; right: 8px; z-index: 5;
+    background: var(--bg-input); border: 1px solid var(--border);
+    color: var(--text-muted); border-radius: var(--radius);
+    padding: 4px 10px; font-size: 0.72rem; cursor: pointer;
+    display: none; transition: 0.15s;
+}
+.reset-zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+.reset-zoom-btn.show { display: block; }
+
+/* ---- Excluded points hint ---- */
+.excl-hint {
+    font-size: 0.72rem; color: var(--text-dim); margin-top: 6px;
+    font-style: italic;
+}
+</style>
+
+<!-- ============== Scripts ============== -->
+
+<!-- Zoom context menu (global, repositioned per use) -->
+<div class="zoom-menu" id="zoomMenu">
+  <div class="zoom-menu-item" data-action="box">Zoom to Selection</div>
+  <div class="zoom-menu-item" data-action="x">Zoom X Axis Only</div>
+  <div class="zoom-menu-item" data-action="y">Zoom Y Axis Only</div>
+  <div class="zoom-menu-divider"></div>
+  <div class="zoom-menu-item" data-action="reset">Reset Zoom</div>
+</div>
+
+<script>
+/* ---------- Tab switching ---------- */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    // Resize all visible charts
+    Object.values(chartInstances).forEach(c => c && c.resize());
+  });
+});
+
+/* ---------- Theme ---------- */
+document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+function toggleTheme() {
+  const root = document.documentElement;
+  const isDark = !root.hasAttribute('data-theme');
+  if (isDark) {
+    root.setAttribute('data-theme', 'light');
+    document.getElementById('themeToggle').textContent = '☀️ Light';
+  } else {
+    root.removeAttribute('data-theme');
+    document.getElementById('themeToggle').textContent = '🌙 Dark';
+  }
+}
+
+/* ---------- State ---------- */
+let uploadedColumns = [];
+let numericColumns  = [];
+let allWells        = [];
+const chartInstances = {};   // cardId -> ECharts instance
+const cardExclusions = {};   // cardId -> Set of excluded indices
+const cardOptions    = {};   // cardId -> original ECharts option (for reset zoom)
+const cardZoomState  = {};   // cardId -> { xMin, xMax, yMin, yMax } current zoom
+
+/* ---------- Upload ---------- */
+const uploadZone = document.getElementById('uploadZone');
+const fileInput  = document.getElementById('fileInput');
+
+['dragenter','dragover'].forEach(e =>
+  uploadZone.addEventListener(e, ev => { ev.preventDefault(); uploadZone.classList.add('dragover'); }));
+['dragleave','drop'].forEach(e =>
+  uploadZone.addEventListener(e, ev => { ev.preventDefault(); uploadZone.classList.remove('dragover'); }));
+uploadZone.addEventListener('drop', e => {
+  if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; handleFile(); }
+});
+fileInput.addEventListener('change', handleFile);
+
+async function handleFile() {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const info = document.getElementById('fileInfo');
+  info.className = 'file-info show';
+  info.innerHTML = '<span class="loader"></span> Uploading & processing…';
+
+  try {
+    const res  = await fetch('/api/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+
+    info.className = 'file-info show';
+    info.innerHTML = `✓ <strong>${data.filename}</strong> — ${data.rows.toLocaleString()} rows × ${data.columns.length} columns`;
+    document.getElementById('headerStatus').textContent = `${data.filename} • ${data.rows.toLocaleString()} rows`;
+
+    uploadedColumns = data.columns;
+    numericColumns  = data.numeric_columns;
+    renderPreview(data.columns, data.preview, data.rows);
+    populateSelectors();
+    document.getElementById('plotsContainer').innerHTML = '';
+  } catch (err) {
+    info.className = 'file-info show error';
+    info.innerHTML = `✗ Error: ${err.message}`;
+  }
+}
+
+function renderPreview(columns, rows, totalRows) {
+  document.getElementById('previewCard').style.display = 'block';
+  document.getElementById('previewNote').textContent =
+    `(first ${rows.length} of ${totalRows.toLocaleString()} rows)`;
+  let html = '<table><thead><tr>';
+  columns.forEach(c => html += `<th>${c}</th>`);
+  html += '</tr></thead><tbody>';
+  rows.forEach(r => {
+    html += '<tr>';
+    columns.forEach(c => html += `<td>${r[c] ?? ''}</td>`);
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('tableWrap').innerHTML = html;
+}
+
+/* ---------- Populate selectors ---------- */
+function populateSelectors() {
+  const selX       = document.getElementById('selX');
+  const selY       = document.getElementById('selY');
+  const selWellCol = document.getElementById('selWellCol');
+
+  selX.innerHTML       = '<option value="">— select —</option>';
+  selY.innerHTML       = '<option value="">— select —</option>';
+  selWellCol.innerHTML = '<option value="">— select —</option>';
+
+  [...numericColumns, ...uploadedColumns.filter(c => !numericColumns.includes(c))]
+    .forEach(c => selX.innerHTML += `<option value="${c}">${c}</option>`);
+  numericColumns.forEach(c => selY.innerHTML += `<option value="${c}">${c}</option>`);
+
+  const catCols = uploadedColumns.filter(c => !numericColumns.includes(c));
+  [...catCols, ...numericColumns].forEach(c => selWellCol.innerHTML += `<option value="${c}">${c}</option>`);
+
+  selWellCol.addEventListener('change', fetchWells);
+}
+
+async function fetchWells() {
+  const wellCol = document.getElementById('selWellCol').value;
+  if (!wellCol) { allWells = []; return; }
+  const res  = await fetch(`/api/wells?well_col=${encodeURIComponent(wellCol)}`);
+  const data = await res.json();
+  allWells = data.wells || [];
+}
+
+/* ====================================================================
+   Dynamic Plots Logic
+   ==================================================================== */
+const container = document.getElementById('plotsContainer');
+const addBtn    = document.getElementById('btnAddPlot');
+
+addBtn.addEventListener('click', () => {
+  if (!document.getElementById('selX').value || !document.getElementById('selY').value || !document.getElementById('selWellCol').value) {
+    alert('Please select Time, Rate, and Well columns first.');
+    return;
+  }
+  addPlotCard();
+});
+
+function addPlotCard() {
+  const cardId = 'card-' + Date.now();
+  const card = document.createElement('div');
+  card.className = 'plot-card';
+  card.id = cardId;
+  cardExclusions[cardId] = new Set();
+
+  let wellOptions = '<option value="">— Choose a Well —</option>';
+  allWells.forEach(w => wellOptions += `<option value="${w}">${w}</option>`);
+
+  card.innerHTML = `
+    <button class="plot-remove" onclick="removeCard('${cardId}')">×</button>
+    <div class="plot-header">
+      <div class="control-group">
+        <label>Well</label>
+        <select class="p-well">${wellOptions}</select>
+      </div>
+      <div class="control-group">
+        <label>Model</label>
+        <select class="p-model">
+          <option value="exponential">Exponential</option>
+          <option value="hyperbolic">Hyperbolic</option>
+          <option value="harmonic">Harmonic</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label>Forecast (months)</label>
+        <input type="number" class="p-forecast" value="0" min="0" style="width:100px;">
+      </div>
+      <div class="control-group">
+        <label>&nbsp;</label>
+        <button class="btn" onclick="runSingleDCA('${cardId}')">Plot</button>
+      </div>
+    </div>
+    <div class="chart-area" style="display:none;">
+      <div class="mini-chart" id="chart-${cardId}"></div>
+      <button class="reset-zoom-btn" id="resetZoom-${cardId}" onclick="resetZoom('${cardId}')">Reset Zoom</button>
+      <div class="param-display" id="params-${cardId}"></div>
+      <div class="excl-hint" id="exclHint-${cardId}">Click scatter points to exclude them from curve fitting</div>
+    </div>
+  `;
+  container.appendChild(card);
+}
+
+function removeCard(id) {
+  if (chartInstances[id]) { chartInstances[id].dispose(); delete chartInstances[id]; }
+  delete cardExclusions[id];
+  delete cardOptions[id];
+  delete cardZoomState[id];
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+/* ---------- Run DCA with exclusions ---------- */
+async function runSingleDCA(cardId) {
+  const card = document.getElementById(cardId);
+  const well = card.querySelector('.p-well').value;
+  const model = card.querySelector('.p-model').value;
+  const months = card.querySelector('.p-forecast').value;
+  if (!well) { alert('Please select a well.'); return; }
+
+  const xVal = document.getElementById('selX').value;
+  const yVal = document.getElementById('selY').value;
+  const wellCol = document.getElementById('selWellCol').value;
+
+  const btn = card.querySelector('.btn');
+  btn.innerHTML = '<span class="loader"></span>';
+  btn.disabled = true;
+
+  const excl = cardExclusions[cardId] || new Set();
+  const exclStr = [...excl].join(',');
+
+  try {
+    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Error');
+    renderSingleChart(cardId, data, months);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.innerHTML = 'Plot';
+    btn.disabled = false;
+  }
+}
+
+function toggleExclusion(cardId, index) {
+  if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
+  const s = cardExclusions[cardId];
+  if (s.has(index)) s.delete(index); else s.add(index);
+  // Save current zoom state before re-render
+  saveZoomState(cardId);
+  runSingleDCA(cardId);
+}
+
+function saveZoomState(cardId) {
+  const chart = chartInstances[cardId];
+  if (!chart) return;
+  const opt = chart.getOption();
+  if (!opt) return;
+  const xa = opt.xAxis && opt.xAxis[0];
+  const ya = opt.yAxis && opt.yAxis[0];
+  cardZoomState[cardId] = {
+    xMin: xa ? xa.min : null,
+    xMax: xa ? xa.max : null,
+    yMin: ya ? ya.min : null,
+    yMax: ya ? ya.max : null
+  };
+}
+
+/* ====================================================================
+   Render Chart (with exclusions, forecast fix, box-select zoom)
+   ==================================================================== */
+function renderSingleChart(cardId, data, forecastMonths) {
+  const card = document.getElementById(cardId);
+  card.querySelector('.chart-area').style.display = 'block';
+  const chartDiv = document.getElementById('chart-' + cardId);
+  const paramDiv = document.getElementById('params-' + cardId);
+  const exclHint = document.getElementById('exclHint-' + cardId);
+
+  const w = data.wells[0];
+  if (!w) return;
+
+  // Sync exclusion state from server response
+  const excluded = new Set(w.excluded_indices || []);
+  cardExclusions[cardId] = excluded;
+
+  // Update hint
+  if (excluded.size > 0) {
+    exclHint.textContent = `${excluded.size} point(s) excluded — click to toggle`;
+  } else {
+    exclHint.textContent = 'Click scatter points to exclude them from curve fitting';
+  }
+
+  // Params display
+  let pHtml = `<span>Model: <strong>${data.model}</strong></span>`;
+  if (w.params) {
+    for (const [k, v] of Object.entries(w.params)) {
+      pHtml += `<span>${k}: <strong>${v}</strong></span>`;
+    }
+  }
+  paramDiv.innerHTML = pHtml;
+
+  // Dispose previous chart instance
+  if (chartInstances[cardId]) { chartInstances[cardId].dispose(); }
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const myChart = echarts.init(chartDiv, isLight ? null : 'dark');
+  chartInstances[cardId] = myChart;
+
+  const isDate = w.is_date || false;
+  const xAxisType = isDate ? 'category' : 'value';
+  const actualLen = w.x.length;
+  const hasForecast = w.forecast && w.forecast.x && w.forecast.x.length > 0;
+
+  // ---- Build included / excluded data ----
+  const series = [];
+
+  if (isDate) {
+    const includedY = [];
+    const excludedY = [];
+    for (let i = 0; i < actualLen; i++) {
+      if (excluded.has(i)) {
+        includedY.push(null);
+        excludedY.push(w.y_actual[i]);
+      } else {
+        includedY.push(w.y_actual[i]);
+        excludedY.push(null);
+      }
+    }
+    series.push({
+      name: 'Actual', type: 'scatter', symbolSize: 6,
+      itemStyle: { color: '#3b82f6' },
+      data: includedY
+    });
+    if (excluded.size > 0) {
+      series.push({
+        name: 'Excluded', type: 'scatter', symbolSize: 6,
+        itemStyle: { color: '#ef4444', opacity: 0.5 },
+        symbol: 'diamond',
+        data: excludedY
+      });
+    }
+    if (w.y_fitted) {
+      series.push({
+        name: 'Fitted', type: 'line', showSymbol: false, smooth: false,
+        lineStyle: { color: '#f59e0b', width: 2 },
+        data: [...w.y_fitted]
+      });
+    }
+  } else {
+    // Value axis: store original index as 3rd element
+    const incData = [], exclData = [];
+    for (let i = 0; i < actualLen; i++) {
+      const pt = [w.x[i], w.y_actual[i], i];
+      if (excluded.has(i)) exclData.push(pt); else incData.push(pt);
+    }
+    series.push({
+      name: 'Actual', type: 'scatter', symbolSize: 6,
+      itemStyle: { color: '#3b82f6' },
+      data: incData
+    });
+    if (excluded.size > 0) {
+      series.push({
+        name: 'Excluded', type: 'scatter', symbolSize: 6,
+        itemStyle: { color: '#ef4444', opacity: 0.5 },
+        symbol: 'diamond',
+        data: exclData
+      });
+    }
+    if (w.y_fitted) {
+      series.push({
+        name: 'Fitted', type: 'line', showSymbol: false, smooth: false,
+        lineStyle: { color: '#f59e0b', width: 2 },
+        data: w.x.map((xv, i) => [xv, w.y_fitted[i]])
+      });
+    }
+  }
+
+  // ---- Category data (copy to avoid mutation) ----
+  let categoryData = isDate ? [...w.x] : undefined;
+
+  // ---- Forecast ----
+  if (hasForecast && isDate) {
+    const forecastX = w.forecast.x;
+    const forecastY = w.forecast.y;
+    const padLen = forecastX.length;
+
+    // Extend categories
+    categoryData = [...w.x, ...forecastX];
+
+    // Pad existing series so they span the full category range
+    series.forEach(s => {
+      if (Array.isArray(s.data)) {
+        s.data = [...s.data, ...Array(padLen).fill(null)];
+      }
+    });
+
+    // Forecast series: pad beginning with actualLen nulls (NOT categoryData.length)
+    const forecastPadded = [...Array(actualLen).fill(null), ...forecastY];
+    series.push({
+      name: 'Forecast', type: 'line', showSymbol: false, smooth: false,
+      lineStyle: { type: 'dashed', color: '#22c55e', width: 2 },
+      data: forecastPadded
+    });
+  } else if (hasForecast) {
+    series.push({
+      name: 'Forecast', type: 'line', showSymbol: false, smooth: false,
+      lineStyle: { type: 'dashed', color: '#22c55e', width: 2 },
+      data: w.forecast.x.map((xv, i) => [xv, w.forecast.y[i]])
+    });
+  }
+
+  // ---- Theme colors ----
+  const axisColor  = isLight ? '#cbd5e1' : '#333750';
+  const splitColor = isLight ? '#e2e8f0' : '#262a3a';
+  const labelColor = isLight ? '#64748b' : '#94a3b8';
+  const titleColor = isLight ? '#0f172a' : '#e2e8f0';
+
+  const option = {
+    backgroundColor: 'transparent',
+    title: { text: w.well, left: 'center', textStyle: { color: titleColor, fontSize: 14 } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: {
+      data: series.map(s => s.name),
+      top: 4, left: 60,
+      textStyle: { color: labelColor, fontSize: 11 }
+    },
+    grid: { left: 60, right: 30, top: 50, bottom: isDate ? 70 : 40 },
+    xAxis: {
+      type: xAxisType,
+      data: isDate ? categoryData : undefined,
+      name: data.x_label,
+      nameLocation: 'middle',
+      nameGap: isDate ? 50 : 25,
+      splitLine: { lineStyle: { color: splitColor, type: 'dashed' } },
+      axisLine: { lineStyle: { color: axisColor } },
+      axisLabel: { color: labelColor, rotate: isDate ? 45 : 0, fontSize: isDate ? 10 : 12 }
+    },
+    yAxis: {
+      type: 'value',
+      name: data.y_label,
+      splitLine: { lineStyle: { color: splitColor, type: 'dashed' } },
+      axisLine: { lineStyle: { color: axisColor } },
+      axisLabel: { color: labelColor }
+    },
+    dataZoom: [
+      { type: 'slider', xAxisIndex: 0, bottom: isDate ? 8 : 4, height: 18 }
+    ],
+    series: series
+  };
+
+  myChart.setOption(option);
+  // Store for reset zoom
+  cardOptions[cardId] = JSON.parse(JSON.stringify(option));
+
+  // Restore zoom state if it was saved (e.g. after point exclusion)
+  const savedZoom = cardZoomState[cardId];
+  if (savedZoom && (savedZoom.xMin != null || savedZoom.yMin != null)) {
+    const zoomOpts = {};
+    if (savedZoom.xMin != null || savedZoom.xMax != null) {
+      zoomOpts.xAxis = { min: savedZoom.xMin, max: savedZoom.xMax };
+    }
+    if (savedZoom.yMin != null || savedZoom.yMax != null) {
+      zoomOpts.yAxis = { min: savedZoom.yMin, max: savedZoom.yMax };
+    }
+    myChart.setOption(zoomOpts);
+    // Show reset button
+    const resetBtn = document.getElementById('resetZoom-' + cardId);
+    if (resetBtn) resetBtn.classList.add('show');
+  }
+
+  // ---- Point click → toggle exclusion ----
+  myChart.on('click', function(params) {
+    if (params.seriesName !== 'Actual' && params.seriesName !== 'Excluded') return;
+    let idx;
+    if (isDate) {
+      idx = params.dataIndex;
+      if (idx >= actualLen) return; // ignore padded nulls
+    } else {
+      idx = params.data && params.data[2];
+    }
+    if (idx !== undefined && idx !== null) {
+      toggleExclusion(cardId, idx);
+    }
+  });
+
+  // ---- Box selection for zoom ----
+  setupBoxSelection(cardId, myChart, chartDiv);
+
+  window.addEventListener('resize', () => myChart.resize());
+}
+
+/* ====================================================================
+   Box Selection & Zoom Menu
+   ==================================================================== */
+let _activeSelection = null; // { cardId, chart, chartDiv, startX, startY, overlay }
+
+function setupBoxSelection(cardId, chart, chartDiv) {
+  // Use native events on the chart div
+  chartDiv.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return; // left click only
+    hideZoomMenu();
+
+    // Check if the click is inside the grid area
+    const rect = chartDiv.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+
+    // Try to convert pixel to data; if it fails, click is outside grid
+    const dataPoint = chart.convertFromPixel('grid', [offsetX, offsetY]);
+    if (!dataPoint) return;
+
+    _activeSelection = {
+      cardId, chart, chartDiv,
+      startX: offsetX, startY: offsetY,
+      overlay: null
+    };
+  });
+}
+
+// Global mousemove / mouseup for selection tracking
+document.addEventListener('mousemove', function(e) {
+  if (!_activeSelection) return;
+  const { chartDiv, startX, startY } = _activeSelection;
+  const rect = chartDiv.getBoundingClientRect();
+  const currentX = e.clientX - rect.left;
+  const currentY = e.clientY - rect.top;
+
+  const dx = Math.abs(currentX - startX);
+  const dy = Math.abs(currentY - startY);
+  if (dx < 5 && dy < 5) return; // too small
+
+  // Create or update overlay
+  if (!_activeSelection.overlay) {
+    const ov = document.createElement('div');
+    ov.className = 'select-overlay';
+    chartDiv.appendChild(ov);
+    _activeSelection.overlay = ov;
+  }
+
+  const ov = _activeSelection.overlay;
+  ov.style.left   = Math.min(startX, currentX) + 'px';
+  ov.style.top    = Math.min(startY, currentY) + 'px';
+  ov.style.width  = dx + 'px';
+  ov.style.height = dy + 'px';
+});
+
+document.addEventListener('mouseup', function(e) {
+  if (!_activeSelection) return;
+  const sel = _activeSelection;
+  _activeSelection = null;
+
+  const rect = sel.chartDiv.getBoundingClientRect();
+  const endX = e.clientX - rect.left;
+  const endY = e.clientY - rect.top;
+
+  // Check minimum drag distance
+  const dx = Math.abs(endX - sel.startX);
+  const dy = Math.abs(endY - sel.startY);
+  if (dx < 10 && dy < 10) {
+    // Too small = click, not drag — remove overlay
+    if (sel.overlay) { sel.overlay.remove(); }
+    return;
+  }
+
+  // Keep overlay visible — store reference so zoom menu can remove it later
+  const selRect = {
+    x1: Math.min(sel.startX, endX),
+    y1: Math.min(sel.startY, endY),
+    x2: Math.max(sel.startX, endX),
+    y2: Math.max(sel.startY, endY)
+  };
+
+  showZoomMenu(e.clientX, e.clientY, sel.cardId, sel.chart, selRect, sel.overlay);
+});
+
+/* ---------- Zoom Menu ---------- */
+const zoomMenuEl = document.getElementById('zoomMenu');
+let _pendingZoom = null;
+
+function showZoomMenu(clientX, clientY, cardId, chart, selRect, overlay) {
+  _pendingZoom = { cardId, chart, selRect, overlay };
+  zoomMenuEl.style.left = clientX + 'px';
+  zoomMenuEl.style.top  = clientY + 'px';
+  zoomMenuEl.classList.add('show');
+}
+
+function hideZoomMenu() {
+  zoomMenuEl.classList.remove('show');
+  // Remove the selection overlay when menu is dismissed
+  if (_pendingZoom && _pendingZoom.overlay) {
+    _pendingZoom.overlay.remove();
+  }
+  _pendingZoom = null;
+}
+
+// Close menu on outside click
+document.addEventListener('mousedown', function(e) {
+  if (!zoomMenuEl.contains(e.target)) hideZoomMenu();
+});
+
+// Menu item handlers
+zoomMenuEl.querySelectorAll('.zoom-menu-item').forEach(item => {
+  item.addEventListener('click', function() {
+    if (!_pendingZoom) { hideZoomMenu(); return; }
+    const action = this.dataset.action;
+    const { cardId, chart, selRect } = _pendingZoom;
+
+    if (action === 'reset') {
+      resetZoom(cardId);
+    } else {
+      applyZoom(chart, selRect, action, cardId);
+    }
+    hideZoomMenu();
+  });
+});
+
+function applyZoom(chart, rect, mode, cardId) {
+  // Convert pixel corners to data values
+  const p1 = chart.convertFromPixel('grid', [rect.x1, rect.y1]);
+  const p2 = chart.convertFromPixel('grid', [rect.x2, rect.y2]);
+  if (!p1 || !p2) return;
+
+  const xMin = Math.min(p1[0], p2[0]);
+  const xMax = Math.max(p1[0], p2[0]);
+  const yMin = Math.min(p1[1], p2[1]);
+  const yMax = Math.max(p1[1], p2[1]);
+
+  const opts = {};
+  if (mode === 'box' || mode === 'x') {
+    opts.xAxis = { min: xMin, max: xMax };
+  }
+  if (mode === 'box' || mode === 'y') {
+    opts.yAxis = { min: yMin, max: yMax };
+  }
+  chart.setOption(opts);
+
+  // Persist zoom state so it survives re-renders
+  cardZoomState[cardId] = {
+    xMin: (mode === 'box' || mode === 'x') ? xMin : null,
+    xMax: (mode === 'box' || mode === 'x') ? xMax : null,
+    yMin: (mode === 'box' || mode === 'y') ? yMin : null,
+    yMax: (mode === 'box' || mode === 'y') ? yMax : null
+  };
+
+  // Show reset button
+  const resetBtn = document.getElementById('resetZoom-' + cardId);
+  if (resetBtn) resetBtn.classList.add('show');
+}
+
+function resetZoom(cardId) {
+  const chart = chartInstances[cardId];
+  const origOpt = cardOptions[cardId];
+  if (chart && origOpt) {
+    chart.setOption({
+      xAxis: { min: origOpt.xAxis.min || null, max: origOpt.xAxis.max || null },
+      yAxis: { min: origOpt.yAxis.min || null, max: origOpt.yAxis.max || null }
+    });
+  }
+  // Clear persisted zoom state
+  delete cardZoomState[cardId];
+  const resetBtn = document.getElementById('resetZoom-' + cardId);
+  if (resetBtn) resetBtn.classList.remove('show');
+}
+
+function enc(s) { return encodeURIComponent(s); }
+</script>
+</body>
+</html>
