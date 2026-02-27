@@ -1636,6 +1636,20 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="style-row">
 
+        <span class="style-label">Fitted Markers</span>
+
+        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-fitted-markers"> Show</label>
+
+        <select class="s-fitted-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
+
+        <input type="range" class="s-fitted-msize" min="2" max="20" value="6" title="Size">
+
+        <span class="s-fitted-msize-val" style="font-size:.7rem;color:var(--text-dim);width:20px;">6</span>
+
+      </div>
+
+      <div class="style-row">
+
         <span class="style-label">Forecast</span>
 
         <input type="color" class="s-forecast-color" value="#22c55e">
@@ -1818,8 +1832,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 function getDefaultStyles() {
 
-  return { actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 6, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 2, forecastMarkers: false, forecastSymbol: 'circle', forecastSymbolSize: 8, p10Color: '#22c55e', p10Line: true, p10Marker: false, p90Color: '#ef4444', p90Line: true, p90Marker: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: '#334155', headerFontWeight: 'normal', headerTextAlign: 'left' };
-
+  return { actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 6, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'circle', fittedSymbolSize: 6, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 2, forecastMarkers: false, forecastSymbol: 'circle', forecastSymbolSize: 8, p10Color: '#22c55e', p10Line: true, p10Marker: false, p90Color: '#ef4444', p90Line: true, p90Marker: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: '#334155', headerFontWeight: 'normal', headerTextAlign: 'left' };
 }
 
 
@@ -1843,6 +1856,12 @@ function readCardStyles(cardId) {
     fittedStyle: card.querySelector('.s-fitted-style')?.value || 'solid',
 
     fittedWidth: parseInt(card.querySelector('.s-fitted-width')?.value || '2'),
+
+    fittedMarkers: card.querySelector('.s-fitted-markers')?.checked || false,
+
+    fittedSymbol: card.querySelector('.s-fitted-symbol')?.value || 'circle',
+
+    fittedSymbolSize: parseInt(card.querySelector('.s-fitted-msize')?.value || '6'),
 
     forecastColor: card.querySelector('.s-forecast-color')?.value || '#22c55e',
 
@@ -1917,6 +1936,12 @@ function applyStylesToCard(cardId, styles) {
   s('.s-fitted-style', styles.fittedStyle);
 
   s('.s-fitted-width', styles.fittedWidth);
+
+  const ftm = card.querySelector('.s-fitted-markers'); if (ftm) ftm.checked = styles.fittedMarkers || false;
+
+  s('.s-fitted-symbol', styles.fittedSymbol);
+
+  s('.s-fitted-msize', styles.fittedSymbolSize);
 
   s('.s-forecast-color', styles.forecastColor);
 
@@ -3016,7 +3041,16 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         for (let i = 0; i < actualLen; i++) { const ci = dateIdx[w.x[i]]; if (ci !== undefined) fitY[ci] = w.y_fitted[i]; }
 
-        series.push({ name: prefix + 'Fitted', type: 'line', showSymbol: false, smooth: false, lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle }, data: fitY });
+        series.push({
+          name: prefix + 'Fitted',
+          type: 'line',
+          showSymbol: st.fittedMarkers,
+          symbol: st.fittedSymbol,
+          symbolSize: st.fittedSymbolSize,
+          smooth: false,
+          lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
+          data: fitY
+        });
 
       }
 
@@ -3058,7 +3092,18 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       if (isSingle && excluded.size > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
-      if (w.y_fitted) series.push({ name: prefix + 'Fitted', type: 'line', showSymbol: false, smooth: false, lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle }, data: w.x.map((xv, i) => [xv, w.y_fitted[i]]) });
+      if (w.y_fitted) {
+        series.push({
+          name: prefix + 'Fitted',
+          type: 'line',
+          showSymbol: st.fittedMarkers,
+          symbol: st.fittedSymbol,
+          symbolSize: st.fittedSymbolSize,
+          smooth: false,
+          lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
+          data: w.x.map((xv, i) => [xv, w.y_fitted[i]])
+        });
+      }
 
       if (hasForecast) {
 
