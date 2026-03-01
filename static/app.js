@@ -98,6 +98,18 @@ const cardUserLines = {};    // { cardId: [{id, type:'h'|'v', value, color, name
 const cardAnnotations = {};  // { cardId: [{id, x, y, xLabel, text, fontSize}] }
 const cardValueLabels = {};  // { cardId: 'none'|'top'|'bottom'|'left'|'right' }
 const cardLogScale = {};     // { cardId: boolean }
+
+/* Parse date string "DD.MM.YYYY" → JS timestamp */
+function parseDateStr(s) {
+  const p = s.split('.');
+  return new Date(+p[2], p[1] - 1, +p[0]).getTime();
+}
+
+/* Format timestamp → "DD.MM.YYYY" */
+function formatDateTs(ts) {
+  const d = new Date(ts);
+  return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear();
+}
 const cardPctChange = {};    // { cardId: boolean }
 const cardAxisLabels = {};   // { cardId: {x:string, y:string} }
 const cardAxisPositions = {}; // { cardId: {x:'bottom'|'top', y:'left'|'right'} }
@@ -1518,7 +1530,7 @@ function addPlotCardToActive() {
 
 
 
-function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, presetCombine, presetHeader) {
+function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, presetCombine, presetHeader, presetCombineAgg) {
 
   const cardId = 'card-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
 
@@ -1539,6 +1551,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
   cardHeaders[cardId] = presetHeader || '';
 
   card._presetCombine = presetCombine || false;
+
+  card._presetCombineAgg = presetCombineAgg || 'sum';
 
 
 
@@ -1572,7 +1586,18 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
             <input type="text" class="well-picker-search" placeholder="Search wells…" oninput="filterWells('${cardId}', this.value)">
 
-            <label class="well-picker-combine"><input type="checkbox" class="p-combine"> Combine (Sum)</label>
+            <label class="well-picker-combine"><input type="checkbox" class="p-combine"> Combine</label>
+
+            <div class="well-picker-agg-row">
+              <span>Aggregate</span>
+              <select class="p-combine-agg">
+                <option value="sum">Sum</option>
+                <option value="mean">Average</option>
+                <option value="median">Median</option>
+                <option value="min">Min</option>
+                <option value="max">Max</option>
+              </select>
+            </div>
 
             <div class="well-picker-list"></div>
 
@@ -1598,13 +1623,32 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="control-group"><label>Forecast (months)</label><input type="number" class="p-forecast" value="${presetForecast || 0}" min="0" style="width:100px;"></div>
 
+      <div class="control-group"><label>X Labels</label><input type="number" class="p-xlabels" value="8" min="2" max="50" style="width:70px;"></div>
+
       <div class="control-group"><label>Title</label><input type="text" class="p-title" value="${presetTitle || ''}" placeholder="Auto (well name)" style="width:150px;"></div>
 
-      <div class="control-group"><label>&nbsp;</label><button class="btn" onclick="runSingleDCA('${cardId}')">Plot</button></div>
+      <div class="control-group"><label>&nbsp;</label>
+        <div style="display:flex;gap:4px;">
+          <button class="btn" onclick="runSingleDCA('${cardId}')" style="flex:1;">Plot</button>
+          <button class="btn btn-outline" title="Full View" onclick="openFullView('${cardId}')" style="padding:0 8px;">⛶</button>
+        </div>
+      </div>
 
     </div>
 
     <div class="style-panel" id="style-${cardId}">
+      <div class="style-row">
+        <span class="style-label">Plot Theme</span>
+        <select class="s-plot-theme">
+          <option value="classic">Classic</option>
+          <option value="ocean">Ocean</option>
+          <option value="sunset">Sunset</option>
+          <option value="forest">Forest</option>
+          <option value="mono">Mono</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:4px 0;">
 
       <div class="style-row">
 
@@ -1640,7 +1684,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
         <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-fitted-markers"> Show</label>
 
-        <select class="s-fitted-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
+        <select class="s-fitted-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle" selected>▲ Triangle</option></select>
 
         <input type="range" class="s-fitted-msize" min="2" max="20" value="6" title="Size">
 
@@ -1734,6 +1778,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="mini-chart" id="chart-${cardId}"></div>
 
+      <div class="formula-display" id="formula-${cardId}" style="display:none;"></div>
+
       <div class="param-display" id="params-${cardId}"></div>
 
       <div class="dca-stats-summary" id="dcaStats-${cardId}" style="display:none;"></div>
@@ -1770,6 +1816,26 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
   }
 
+  const combAggSel = card.querySelector('.p-combine-agg');
+  if (combAggSel) {
+    combAggSel.value = card._presetCombineAgg || 'sum';
+    const combCb = card.querySelector('.p-combine');
+    combAggSel.disabled = !(combCb && combCb.checked);
+  }
+
+  const combCb = card.querySelector('.p-combine');
+  if (combCb) {
+    combCb.addEventListener('change', () => {
+      const aggSel = card.querySelector('.p-combine-agg');
+      if (aggSel) aggSel.disabled = !combCb.checked;
+      _debouncedAutoSave();
+    });
+  }
+
+  if (combAggSel) {
+    combAggSel.addEventListener('change', _debouncedAutoSave);
+  }
+
 
 
   // Wire up range label displays AND live style re-render
@@ -1790,6 +1856,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       renderSingleChart(cardId, cardLastData[cardId], card.querySelector('.p-forecast')?.value || 0);
     }
   };
+  const plotThemeSelect = card.querySelector('.s-plot-theme');
 
   card.querySelectorAll('input[type="range"]').forEach(r => {
 
@@ -1807,12 +1874,30 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
   card.querySelectorAll('.style-panel input[type="color"], .style-panel select, .style-panel input[type="checkbox"]').forEach(el => {
 
-    el.addEventListener('change', liveStyleRerender);
+    el.addEventListener('change', () => {
+      if (!el.classList.contains('s-plot-theme') && plotThemeSelect && plotThemeSelect.value !== 'custom') {
+        plotThemeSelect.value = 'custom';
+      }
+      liveStyleRerender();
+    });
 
   });
 
   const titleInput = card.querySelector('.p-title');
   if (titleInput) titleInput.addEventListener('input', liveStyleRerender);
+
+  const xLabelsInput = card.querySelector('.p-xlabels');
+  if (xLabelsInput) xLabelsInput.addEventListener('input', liveStyleRerender);
+
+  if (plotThemeSelect) {
+    plotThemeSelect.addEventListener('change', () => {
+      const selectedTheme = plotThemeSelect.value;
+      if (selectedTheme !== 'custom') {
+        applyPlotThemePresetToCard(cardId, selectedTheme);
+        liveStyleRerender();
+      }
+    });
+  }
 
   const headerInput = card.querySelector('.p-header');
   if (headerInput) {
@@ -1832,7 +1917,49 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 function getDefaultStyles() {
 
-  return { actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 6, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'circle', fittedSymbolSize: 6, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 2, forecastMarkers: false, forecastSymbol: 'circle', forecastSymbolSize: 8, p10Color: '#22c55e', p10Line: true, p10Marker: false, p90Color: '#ef4444', p90Line: true, p90Marker: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: '#334155', headerFontWeight: 'normal', headerTextAlign: 'left' };
+  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 6, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 6, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 2, forecastMarkers: false, forecastSymbol: 'circle', forecastSymbolSize: 8, p10Color: '#22c55e', p10Line: true, p10Marker: false, p90Color: '#ef4444', p90Line: true, p90Marker: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: '#334155', headerFontWeight: 'normal', headerTextAlign: 'left' };
+}
+
+const PLOT_THEME_PRESETS = {
+  classic: {
+    actualColor: '#3b82f6', fittedColor: '#f59e0b', forecastColor: '#22c55e', p10Color: '#22c55e', p90Color: '#ef4444',
+    palette: ['#3b82f6', '#f59e0b', '#22c55e', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+  },
+  ocean: {
+    actualColor: '#2563eb', fittedColor: '#0ea5e9', forecastColor: '#14b8a6', p10Color: '#06b6d4', p90Color: '#0891b2',
+    palette: ['#2563eb', '#0ea5e9', '#14b8a6', '#06b6d4', '#0f766e', '#38bdf8', '#1d4ed8', '#67e8f9']
+  },
+  sunset: {
+    actualColor: '#f97316', fittedColor: '#ef4444', forecastColor: '#f59e0b', p10Color: '#fb7185', p90Color: '#dc2626',
+    palette: ['#f97316', '#ef4444', '#f59e0b', '#fb7185', '#eab308', '#dc2626', '#f43f5e', '#fdba74']
+  },
+  forest: {
+    actualColor: '#16a34a', fittedColor: '#15803d', forecastColor: '#65a30d', p10Color: '#22c55e', p90Color: '#14532d',
+    palette: ['#16a34a', '#15803d', '#65a30d', '#22c55e', '#166534', '#84cc16', '#4d7c0f', '#86efac']
+  },
+  mono: {
+    actualColor: '#64748b', fittedColor: '#334155', forecastColor: '#0f172a', p10Color: '#475569', p90Color: '#1e293b',
+    palette: ['#64748b', '#334155', '#0f172a', '#475569', '#1e293b', '#94a3b8', '#0b1220', '#7f8ea3']
+  },
+};
+
+function getPlotThemePalette(themeName) {
+  return (PLOT_THEME_PRESETS[themeName] || PLOT_THEME_PRESETS.classic).palette;
+}
+
+function applyPlotThemePresetToCard(cardId, themeName) {
+  const card = document.getElementById(cardId);
+  const preset = PLOT_THEME_PRESETS[themeName];
+  if (!card || !preset) return;
+  const setVal = (sel, val) => {
+    const el = card.querySelector(sel);
+    if (el) el.value = val;
+  };
+  setVal('.s-actual-color', preset.actualColor);
+  setVal('.s-fitted-color', preset.fittedColor);
+  setVal('.s-forecast-color', preset.forecastColor);
+  setVal('.s-p10-color', preset.p10Color);
+  setVal('.s-p90-color', preset.p90Color);
 }
 
 
@@ -1844,6 +1971,7 @@ function readCardStyles(cardId) {
   if (!card) return getDefaultStyles();
 
   return {
+    plotTheme: card.querySelector('.s-plot-theme')?.value || 'classic',
 
     actualColor: card.querySelector('.s-actual-color')?.value || '#3b82f6',
 
@@ -1859,7 +1987,7 @@ function readCardStyles(cardId) {
 
     fittedMarkers: card.querySelector('.s-fitted-markers')?.checked || false,
 
-    fittedSymbol: card.querySelector('.s-fitted-symbol')?.value || 'circle',
+    fittedSymbol: card.querySelector('.s-fitted-symbol')?.value || 'triangle',
 
     fittedSymbolSize: parseInt(card.querySelector('.s-fitted-msize')?.value || '6'),
 
@@ -1906,8 +2034,10 @@ function applyStylesToCard(cardId, styles) {
   const card = document.getElementById(cardId);
 
   if (!card || !styles) return;
+  const merged = { ...getDefaultStyles(), ...styles };
 
   const s = (sel, val) => {
+    if (val === undefined || val === null) return;
 
     const el = card.querySelector(sel);
 
@@ -1925,56 +2055,58 @@ function applyStylesToCard(cardId, styles) {
 
   };
 
-  s('.s-actual-color', styles.actualColor);
+  s('.s-plot-theme', merged.plotTheme || 'classic');
 
-  s('.s-actual-symbol', styles.actualSymbol);
+  s('.s-actual-color', merged.actualColor);
 
-  s('.s-actual-size', styles.actualSize);
+  s('.s-actual-symbol', merged.actualSymbol);
 
-  s('.s-fitted-color', styles.fittedColor);
+  s('.s-actual-size', merged.actualSize);
 
-  s('.s-fitted-style', styles.fittedStyle);
+  s('.s-fitted-color', merged.fittedColor);
 
-  s('.s-fitted-width', styles.fittedWidth);
+  s('.s-fitted-style', merged.fittedStyle);
 
-  const ftm = card.querySelector('.s-fitted-markers'); if (ftm) ftm.checked = styles.fittedMarkers || false;
+  s('.s-fitted-width', merged.fittedWidth);
 
-  s('.s-fitted-symbol', styles.fittedSymbol);
+  const ftm = card.querySelector('.s-fitted-markers'); if (ftm) ftm.checked = merged.fittedMarkers || false;
 
-  s('.s-fitted-msize', styles.fittedSymbolSize);
+  s('.s-fitted-symbol', merged.fittedSymbol);
 
-  s('.s-forecast-color', styles.forecastColor);
+  s('.s-fitted-msize', merged.fittedSymbolSize);
 
-  s('.s-forecast-style', styles.forecastStyle);
+  s('.s-forecast-color', merged.forecastColor);
 
-  s('.s-forecast-width', styles.forecastWidth);
+  s('.s-forecast-style', merged.forecastStyle);
 
-  const fcm = card.querySelector('.s-forecast-markers'); if (fcm) fcm.checked = styles.forecastMarkers || false;
+  s('.s-forecast-width', merged.forecastWidth);
 
-  s('.s-forecast-symbol', styles.forecastSymbol);
+  const fcm = card.querySelector('.s-forecast-markers'); if (fcm) fcm.checked = merged.forecastMarkers || false;
 
-  s('.s-forecast-msize', styles.forecastSymbolSize);
+  s('.s-forecast-symbol', merged.forecastSymbol);
 
-  s('.s-p10-color', styles.p10Color || '#22c55e');
+  s('.s-forecast-msize', merged.forecastSymbolSize);
 
-  const p10l = card.querySelector('.s-p10-line'); if (p10l) p10l.checked = styles.p10Line !== false;
+  s('.s-p10-color', merged.p10Color || '#22c55e');
 
-  const p10m = card.querySelector('.s-p10-marker'); if (p10m) p10m.checked = styles.p10Marker || false;
+  const p10l = card.querySelector('.s-p10-line'); if (p10l) p10l.checked = merged.p10Line !== false;
 
-  s('.s-p90-color', styles.p90Color || '#ef4444');
+  const p10m = card.querySelector('.s-p10-marker'); if (p10m) p10m.checked = merged.p10Marker || false;
 
-  const p90l = card.querySelector('.s-p90-line'); if (p90l) p90l.checked = styles.p90Line !== false;
+  s('.s-p90-color', merged.p90Color || '#ef4444');
 
-  const p90m = card.querySelector('.s-p90-marker'); if (p90m) p90m.checked = styles.p90Marker || false;
+  const p90l = card.querySelector('.s-p90-line'); if (p90l) p90l.checked = merged.p90Line !== false;
 
-  const gx = card.querySelector('.s-grid-x'); if (gx) gx.checked = styles.gridX !== false;
+  const p90m = card.querySelector('.s-p90-marker'); if (p90m) p90m.checked = merged.p90Marker || false;
 
-  const gy = card.querySelector('.s-grid-y'); if (gy) gy.checked = styles.gridY !== false;
+  const gx = card.querySelector('.s-grid-x'); if (gx) gx.checked = merged.gridX !== false;
 
-  s('.s-header-fsize', styles.headerFontSize || 1.8);
-  s('.s-header-color', styles.headerColor || '#334155');
-  const hb = card.querySelector('.s-header-bold'); if (hb) hb.checked = styles.headerFontWeight === 'bold';
-  s('.s-header-align', styles.headerTextAlign || 'left');
+  const gy = card.querySelector('.s-grid-y'); if (gy) gy.checked = merged.gridY !== false;
+
+  s('.s-header-fsize', merged.headerFontSize || 1.8);
+  s('.s-header-color', merged.headerColor || '#334155');
+  const hb = card.querySelector('.s-header-bold'); if (hb) hb.checked = merged.headerFontWeight === 'bold';
+  s('.s-header-align', merged.headerTextAlign || 'left');
 }
 
 
@@ -2029,6 +2161,8 @@ async function runSingleDCA(cardId) {
 
   const combine = isCombineMode(cardId);
 
+  const combineAgg = getCombineAggMode(cardId);
+
   if (!well) { alert('Please select at least one well.'); return; }
 
   const xVal = document.getElementById('selX').value;
@@ -2049,7 +2183,7 @@ async function runSingleDCA(cardId) {
 
   try {
 
-    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}&combine=${combine}`;
+    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}&combine=${combine}&combine_func=${enc(combineAgg)}`;
 
     const res = await fetch(url);
 
@@ -2085,7 +2219,121 @@ function toggleExclusion(cardId, index) {
 
 }
 
+/* ====================================================================
 
+   Full View Modal
+
+   ==================================================================== */
+
+function openFullView(cardId) {
+  const data = cardLastData[cardId];
+  if (!data) {
+    alert("Please generate the plot first!");
+    return;
+  }
+
+  const existingChart = chartInstances[cardId];
+  if (!existingChart) {
+    alert("Chart instance not found.");
+    return;
+  }
+
+  const fullId = 'fullChart-' + cardId;
+  const cardTitle = document.querySelector(`#${cardId} .p-title`)?.value || 'Full View';
+
+  const modalHtml = `
+    <div class="modal-overlay" onclick="if(event.target===this)this.remove()">
+      <div class="modal modal-full-view">
+        <div class="modal-full-view-header">
+          <span class="modal-full-view-title">${cardTitle}</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-outline btn-sm reset-zoom-btn" id="resetZoomFull-${cardId}" onclick="resetZoom('${cardId}')">Reset Zoom</button>
+            <button class="btn btn-outline btn-sm" onclick="this.closest('.modal-overlay').remove()">Close</button>
+          </div>
+        </div>
+        <div class="modal-full-view-content">
+          <div id="${fullId}" class="modal-full-view-chart"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('modalContainer').innerHTML = modalHtml;
+
+  requestAnimationFrame(() => {
+    const chartDiv = document.getElementById(fullId);
+    if (!chartDiv) return;
+
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    const fullChart = echarts.init(chartDiv, isLight ? null : 'dark');
+    
+    const opts = existingChart.getOption();
+    if(opts) {
+        // Ensure the chart resizes properly
+        opts.grid = opts.grid || {};
+        // Reset grid to be responsive or fit the new container
+        // Actually, copying options might carry over fixed pixel sizes if they were set.
+        // Let's rely on ECharts default responsiveness if 'containLabel' is true.
+        
+        fullChart.setOption(opts);
+    }
+    const z = cardZoomState[cardId];
+    setResetZoomButtonsVisible(cardId, !!(z && (z.xMin != null || z.xMax != null || z.yMin != null || z.yMax != null)));
+    
+    // Store full chart instance
+    chartInstances[fullId] = fullChart;
+
+    // Attach interactive events (same as main chart)
+    const isSingle = data.wells.length === 1;
+    if (isSingle) {
+      fullChart.on('click', function (params) {
+        if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
+          const annId = parseInt(params.name.replace('ann_', ''));
+          const anns = cardAnnotations[cardId] || [];
+          const idx = anns.findIndex(a => a.id === annId);
+          if (idx >= 0) showAnnotationEditor(cardId, idx, params.event);
+          return;
+        }
+        if (!params.seriesName.endsWith('Actual') && params.seriesName !== 'Excluded') return;
+        let idx = params.data && params.data[2];
+        if (idx !== undefined && idx !== null) toggleExclusion(cardId, idx);
+      });
+    } else {
+      fullChart.on('click', function (params) {
+        if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
+          const annId = parseInt(params.name.replace('ann_', ''));
+          const anns = cardAnnotations[cardId] || [];
+          const idx = anns.findIndex(a => a.id === annId);
+          if (idx >= 0) showAnnotationEditor(cardId, idx, params.event);
+        }
+      });
+    }
+
+    setupLegendColorPicker(cardId, fullChart);
+    setupPCurveDragHandles(cardId, fullChart);
+    setupQiDragHandle(cardId, fullChart);
+    setupUserLineDrag(cardId, fullChart);
+    setupAxisDragHandles(cardId, fullChart);
+    setupBoxSelection(cardId, fullChart, chartDiv);
+    setupAxisHoverTooltip(cardId, chartDiv); // cardId allows axis hover to read same global axis styles
+    
+    // Resize observer to handle window resize while modal is open
+    const resizeObserver = new ResizeObserver(() => fullChart.resize());
+    resizeObserver.observe(chartDiv);
+    
+    // Clean up observer when modal is removed
+    const overlay = document.querySelector('.modal-overlay');
+    if(overlay) {
+        const originalRemove = overlay.remove.bind(overlay);
+        overlay.remove = function() {
+            resizeObserver.disconnect();
+            fullChart.dispose();
+            delete chartInstances[fullId]; // Clean up instance
+            originalRemove();
+        };
+    }
+  });
+}
 
 function saveZoomState(cardId) {
 
@@ -2315,25 +2563,13 @@ function setupPCurveDragHandles(cardId, myChart) {
 
         let val, xIdx;
 
-        if (isDate) {
+        if (!Array.isArray(sData[di]) || sData[di][1] == null) { prevPt = null; continue; }
 
-          val = sData[di]; if (val == null) { prevPt = null; continue; }
-
-          xIdx = di;
-
-        } else {
-
-          if (!Array.isArray(sData[di]) || sData[di][1] == null) { prevPt = null; continue; }
-
-          val = sData[di][1]; xIdx = sData[di][0];
-
-        }
+        val = sData[di][1]; xIdx = sData[di][0];
 
         let ptPx;
 
-        if (isDate) { ptPx = myChart.convertToPixel({ seriesIndex: si }, [di, val]); }
-
-        else { ptPx = myChart.convertToPixel('grid', [xIdx, val]); }
+        ptPx = myChart.convertToPixel('grid', [xIdx, val]);
 
         if (!ptPx) { prevPt = null; continue; }
 
@@ -2395,37 +2631,63 @@ function setupPCurveDragHandles(cardId, myChart) {
 
     if (isDate) {
 
-      const dp = myChart.convertFromPixel({ seriesIndex: 0 }, [pxX, 0]);
+      const dp = myChart.convertFromPixel('grid', [pxX, 0]);
 
       if (!dp) return null;
 
-      const catIdx = Math.round(dp[0]);
+      const tsVal = dp[0]; // timestamp
 
-      const opt = myChart.getOption();
+      /* Find the closest t value by matching date */
 
-      const catData = opt.xAxis[0].data;
+      let bestIdx = 0, bestDiff = Infinity;
 
-      if (catIdx < 0 || catIdx >= catData.length) return null;
+      for (let i = 0; i < w.x.length; i++) {
 
-      /* Find the corresponding t value */
+        const ts = parseDateStr(w.x[i]);
 
-      const xLabel = catData[catIdx];
+        const d = Math.abs(ts - tsVal);
 
-      const wi = w.x.indexOf(xLabel);
-
-      if (wi >= 0) return w.t[wi];
-
-      /* Maybe it's a forecast label */
-
-      if (w.forecast && w.forecast.x) {
-
-        const fi = w.forecast.x.indexOf(xLabel);
-
-        if (fi >= 0 && w.forecast.t) return w.forecast.t[fi];
+        if (d < bestDiff) { bestDiff = d; bestIdx = i; }
 
       }
 
-      return null;
+      /* Also check forecast dates */
+
+      if (w.forecast && w.forecast.x) {
+
+        for (let i = 0; i < w.forecast.x.length; i++) {
+
+          const ts = parseDateStr(w.forecast.x[i]);
+
+          const d = Math.abs(ts - tsVal);
+
+          if (d < bestDiff) { bestDiff = d; bestIdx = -1; /* use forecast t */ }
+
+        }
+
+        if (bestIdx === -1) {
+
+          /* Re-find in forecast */
+
+          let bfi = 0, bfd = Infinity;
+
+          for (let i = 0; i < w.forecast.x.length; i++) {
+
+            const ts = parseDateStr(w.forecast.x[i]);
+
+            const d = Math.abs(ts - tsVal);
+
+            if (d < bfd) { bfd = d; bfi = i; }
+
+          }
+
+          if (w.forecast.t) return w.forecast.t[bfi];
+
+        }
+
+      }
+
+      return w.t[bestIdx];
 
     } else {
 
@@ -2519,7 +2781,9 @@ function setupPCurveDragHandles(cardId, myChart) {
 
         }
 
-        const cp = myChart.convertToPixel({ seriesIndex: 0 }, [bestIdx, 0]);
+        const ts = parseDateStr(w.x[bestIdx]);
+
+        const cp = myChart.convertToPixel('grid', [ts, 0]);
 
         return cp ? cp[0] : e.offsetX;
 
@@ -2541,7 +2805,7 @@ function setupPCurveDragHandles(cardId, myChart) {
 
     if (isDate) {
 
-      const dp = myChart.convertFromPixel({ seriesIndex: 0 }, [anchorXPx, py]);
+      const dp = myChart.convertFromPixel('grid', [anchorXPx, py]);
 
       newDataY = dp ? dp[1] : 0;
 
@@ -2645,91 +2909,53 @@ function buildPCurveData(w, data, diValue, isDate, categoryData) {
 
 
 
-  if (isDate && categoryData) {
+  /* Both date and numeric modes now return [x, y] pair arrays */
 
-    const dateIdx = {}; categoryData.forEach((d, i) => dateIdx[d] = i);
+  const pts = [];
 
-    const arr = Array(categoryData.length).fill(null);
+  /* Fitted region */
 
-    /* Fitted region */
+  for (let i = 0; i < w.t.length; i++) {
 
-    for (let i = 0; i < w.t.length; i++) {
+    if (w.y_fitted && w.y_fitted[i] != null) {
 
-      if (w.y_fitted && w.y_fitted[i] != null) {
+      const xVal = isDate ? parseDateStr(w.x[i]) : w.x[i];
 
-        const ci = dateIdx[w.x[i]];
-
-        if (ci !== undefined) arr[ci] = evalDeclineModel(model, w.t[i], pParams);
-
-      }
+      pts.push([xVal, evalDeclineModel(model, w.t[i], pParams)]);
 
     }
-
-    /* Forecast region */
-
-    if (hasForecast && w.forecast.t) {
-
-      for (let i = 0; i < w.forecast.t.length; i++) {
-
-        const ci = dateIdx[w.forecast.x[i]];
-
-        if (ci !== undefined) arr[ci] = evalDeclineModel(model, w.forecast.t[i], pParams);
-
-      }
-
-      /* Bridge: connect fitted end to forecast start */
-
-      if (lastFit >= 0) {
-
-        const lastCi = dateIdx[w.x[lastFit]];
-
-        if (lastCi !== undefined) arr[lastCi] = evalDeclineModel(model, w.t[lastFit], pParams);
-
-      }
-
-    }
-
-    return arr;
-
-  } else {
-
-    const pts = [];
-
-    /* Fitted region */
-
-    for (let i = 0; i < w.t.length; i++) {
-
-      if (w.y_fitted && w.y_fitted[i] != null) {
-
-        pts.push([w.x[i], evalDeclineModel(model, w.t[i], pParams)]);
-
-      }
-
-    }
-
-    /* Forecast region */
-
-    if (hasForecast && w.forecast.t) {
-
-      /* Bridge from last fitted point */
-
-      if (lastFit >= 0 && (pts.length === 0 || pts[pts.length - 1][0] !== w.x[lastFit])) {
-
-        pts.push([w.x[lastFit], evalDeclineModel(model, w.t[lastFit], pParams)]);
-
-      }
-
-      for (let i = 0; i < w.forecast.t.length; i++) {
-
-        pts.push([w.forecast.x[i], evalDeclineModel(model, w.forecast.t[i], pParams)]);
-
-      }
-
-    }
-
-    return pts;
 
   }
+
+  /* Forecast region */
+
+  if (hasForecast && w.forecast.t) {
+
+    /* Bridge from last fitted point */
+
+    if (lastFit >= 0) {
+
+      const lastX = isDate ? parseDateStr(w.x[lastFit]) : w.x[lastFit];
+
+      if (pts.length === 0 || pts[pts.length - 1][0] !== lastX) {
+
+        pts.push([lastX, evalDeclineModel(model, w.t[lastFit], pParams)]);
+
+      }
+
+    }
+
+    for (let i = 0; i < w.forecast.t.length; i++) {
+
+      const xVal = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
+
+      pts.push([xVal, evalDeclineModel(model, w.forecast.t[i], pParams)]);
+
+    }
+
+  }
+
+  return pts;
 
 }
 
@@ -2767,8 +2993,6 @@ function updatePCurveSeries(cardId, myChart) {
 
   const seriesOpt = opt.series;
 
-  const categoryData = isDate ? opt.xAxis[0].data : null;
-
 
 
   let p10Idx = -1, p90Idx = -1;
@@ -2785,9 +3009,9 @@ function updatePCurveSeries(cardId, myChart) {
 
 
 
-  const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, categoryData);
+  const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, null);
 
-  const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, categoryData);
+  const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
 
 
 
@@ -2812,6 +3036,674 @@ function updatePCurveSeries(cardId, myChart) {
   seriesOpt[p90Idx].showSymbol = p90ShowMarker;
 
   myChart.setOption({ series: seriesOpt }, false);
+
+}
+
+
+
+/* ====================================================================
+
+   Qi Drag – change initial rate by dragging the first fitted point
+
+   ==================================================================== */
+
+function setupQiDragHandle(cardId, myChart) {
+
+  const data = cardLastData[cardId];
+
+  if (!data || !data.wells || data.wells.length !== 1) return; // single-well only
+
+  const w = data.wells[0];
+
+  if (!w.y_fitted || !w.params || !w.t) return;
+
+  if (!w.params.qi) return;
+
+  const model = data.model || 'exponential';
+
+  const isDate = w.is_date || false;
+
+  const zr = myChart.getZr();
+
+  let dragging = false;
+
+
+
+  /* Index of the first non-null fitted point */
+
+  function getFirstFittedIdx() {
+
+    for (let i = 0; i < (w.y_fitted || []).length; i++) {
+
+      if (w.y_fitted[i] != null) return i;
+
+    }
+
+    return -1;
+
+  }
+
+
+
+  /* Hit-test: is pixel within threshold of the first fitted point? */
+
+  function hitTestInitialPoint(px, py) {
+
+    const THRESHOLD = 14;
+
+    const opt = myChart.getOption();
+
+    if (!opt || !opt.series) return false;
+
+    const firstIdx = getFirstFittedIdx();
+
+    if (firstIdx < 0) return false;
+
+    for (let si = 0; si < opt.series.length; si++) {
+
+      const s = opt.series[si];
+
+      if (!s.name || !s.name.endsWith('Fitted')) continue;
+
+      const sData = s.data;
+
+      if (!sData || sData.length === 0) continue;
+
+      /* Find the first non-null data point in this series */
+
+      for (let di = 0; di < sData.length; di++) {
+
+        if (!Array.isArray(sData[di]) || sData[di][1] == null) continue;
+
+        const ptPx = myChart.convertToPixel('grid', [sData[di][0], sData[di][1]]);
+
+        if (!ptPx) continue;
+
+        if (Math.abs(ptPx[0] - px) < THRESHOLD && Math.abs(ptPx[1] - py) < THRESHOLD) return true;
+
+        break; // only check the first valid point
+
+      }
+
+    }
+
+    return false;
+
+  }
+
+
+
+  function onMouseDown(e) {
+
+    if (hitTestInitialPoint(e.offsetX, e.offsetY)) {
+
+      dragging = true;
+
+      myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
+
+      e.event && e.event.preventDefault && e.event.preventDefault();
+
+    }
+
+  }
+
+
+
+  function onMouseMove(e) {
+
+    if (!dragging) {
+
+      /* Only set cursor when actually over the point; don't clear it (other handlers manage cursor too) */
+
+      if (hitTestInitialPoint(e.offsetX, e.offsetY)) myChart.getDom().style.cursor = 'ns-resize';
+
+      return;
+
+    }
+
+    const py = e.offsetY;
+
+    const firstIdx = getFirstFittedIdx();
+
+    if (firstIdx < 0) return;
+
+    /* X-pixel of the initial point (keep it fixed) */
+
+    const xVal = isDate ? parseDateStr(w.x[firstIdx]) : w.x[firstIdx];
+
+    const ptPx = myChart.convertToPixel('grid', [xVal, 0]);
+
+    const xPx = ptPx ? ptPx[0] : e.offsetX;
+
+    /* Convert mouse Y → data Y at that X */
+
+    const dp = myChart.convertFromPixel('grid', [xPx, py]);
+
+    const newQi = dp ? dp[1] : null;
+
+    if (!newQi || newQi <= 0) return;
+
+    /* Update qi in the stored data */
+
+    w.params.qi = Math.round(newQi * 1e6) / 1e6;
+
+    /* Recalculate fitted values */
+
+    for (let i = 0; i < w.t.length; i++) {
+
+      if (w.y_fitted[i] != null) w.y_fitted[i] = evalDeclineModel(model, w.t[i], w.params);
+
+    }
+
+    /* Recalculate forecast values */
+
+    if (w.forecast && w.forecast.t) {
+
+      for (let i = 0; i < w.forecast.t.length; i++) {
+
+        w.forecast.y[i] = evalDeclineModel(model, w.forecast.t[i], w.params);
+
+      }
+
+    }
+
+    /* Patch the chart series in-place */
+
+    const opt = myChart.getOption();
+
+    const seriesOpt = opt.series;
+
+    for (let si = 0; si < seriesOpt.length; si++) {
+
+      const s = seriesOpt[si];
+
+      if (!s.name) continue;
+
+      if (s.name.endsWith('Fitted')) {
+
+        /* Rebuild fitted data */
+
+        seriesOpt[si].data = isDate
+
+          ? w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]])
+
+          : w.x.map((xv, i) => [xv, w.y_fitted[i]]);
+
+      }
+
+      if (s.name.endsWith('Forecast') && w.forecast && w.forecast.x) {
+
+        /* Rebuild forecast data — include bridge point from last fitted to avoid gap */
+
+        const fData = [];
+
+        let lfi = (w.y_fitted || []).length - 1;
+
+        while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--;
+
+        if (lfi >= 0) {
+
+          const bx = isDate ? parseDateStr(w.x[lfi]) : w.x[lfi];
+
+          fData.push([bx, w.y_fitted[lfi]]);
+
+        }
+
+        for (let i = 0; i < w.forecast.x.length; i++) {
+
+          const xv = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
+
+          fData.push([xv, w.forecast.y[i]]);
+
+        }
+
+        seriesOpt[si].data = fData;
+
+      }
+
+    }
+
+    myChart.setOption({ series: seriesOpt }, false);
+
+    /* Update P10/P90 curves if enabled (they depend on qi) */
+
+    const ps = cardPCurveState[cardId];
+
+    if (ps && ps.enabled) updatePCurveSeries(cardId, myChart);
+
+    /* Update formula display */
+
+    updateQiDisplay(cardId);
+
+    e.event && e.event.preventDefault && e.event.preventDefault();
+
+  }
+
+
+
+  function onMouseUp() {
+
+    if (dragging) {
+
+      dragging = false;
+
+      myChart.getDom().style.cursor = '';
+
+      /* Also sync the other chart (mini ↔ full view) */
+
+      const fullId = 'fullChart-' + cardId;
+
+      const otherChart = myChart === chartInstances[fullId] ? chartInstances[cardId] : chartInstances[fullId];
+
+      if (otherChart) {
+
+        const seriesSync = myChart.getOption().series;
+
+        otherChart.setOption({ series: seriesSync }, false);
+
+        const psSync = cardPCurveState[cardId];
+
+        if (psSync && psSync.enabled) updatePCurveSeries(cardId, otherChart);
+
+      }
+
+    }
+
+  }
+
+
+
+  if (myChart.__qiDragCleanup) myChart.__qiDragCleanup();
+
+  zr.on('mousedown', onMouseDown);
+
+  zr.on('mousemove', onMouseMove);
+
+  zr.on('mouseup', onMouseUp);
+
+  zr.on('globalout', onMouseUp);
+
+  myChart.__qiDragCleanup = () => {
+
+    zr.off('mousedown', onMouseDown);
+
+    zr.off('mousemove', onMouseMove);
+
+    zr.off('mouseup', onMouseUp);
+
+    zr.off('globalout', onMouseUp);
+
+    delete myChart.__qiDragCleanup;
+
+  };
+
+}
+
+
+
+/* Helper: update the formula + parameter display after qi change */
+
+function updateQiDisplay(cardId) {
+
+  const data = cardLastData[cardId];
+
+  if (!data || !data.wells || data.wells.length === 0) return;
+
+  const w = data.wells[0];
+
+  if (!w.params) return;
+
+  const p = w.params;
+
+  const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
+
+  /* Update parameter badges */
+
+  const paramDiv = document.getElementById('params-' + cardId);
+
+  if (paramDiv) {
+
+    let pHtml = `<span>Model: <strong>${data.model}</strong></span>`;
+
+    for (const [k, v] of Object.entries(p)) pHtml += `<span>${k}: <strong>${typeof v === 'number' ? fmt(v) : v}</strong></span>`;
+
+    paramDiv.innerHTML = pHtml;
+
+  }
+
+  /* Update formula */
+
+  const formulaDiv = document.getElementById('formula-' + cardId);
+
+  if (formulaDiv && w.equation) {
+
+    const modelName = (data.model || '').toLowerCase();
+
+    let formulaHtml = '';
+
+    if (modelName === 'exponential') {
+
+      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> &middot; e<sup>&minus;d<sub>i</sub>&middot;t</sup></span>`
+
+        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} &middot; e<sup>&minus;${fmt(p.di)}&middot;t</sup></span>`;
+
+    } else if (modelName === 'hyperbolic') {
+
+      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + b&middot;d<sub>i</sub>&middot;t)<sup>1/b</sup></span>`
+
+        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.b)}&middot;${fmt(p.di)}&middot;t)<sup>1/${fmt(p.b)}</sup></span>`;
+
+    } else if (modelName === 'harmonic') {
+
+      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + d<sub>i</sub>&middot;t)</span>`
+
+        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.di)}&middot;t)</span>`;
+
+    } else {
+
+      formulaHtml = `<span class="formula-fitted">${w.equation}</span>`;
+
+    }
+
+    formulaDiv.innerHTML = formulaHtml;
+
+  }
+
+  /* Update DCA stats */
+
+  const dcaStatsDiv = document.getElementById('dcaStats-' + cardId);
+
+  if (dcaStatsDiv) {
+
+    const fittedVals = w.y_fitted ? w.y_fitted.filter(v => v != null) : [];
+
+    if (fittedVals.length >= 2) {
+
+      const entries = dcaStatsDiv.querySelectorAll('span');
+
+      entries.forEach(sp => {
+
+        if (sp.textContent.includes('Fitted Start')) {
+
+          sp.innerHTML = `Fitted Start: <strong>${fittedVals[0].toFixed(2)}</strong>`;
+
+        } else if (sp.textContent.includes('Fitted End')) {
+
+          sp.innerHTML = `Fitted End: <strong>${fittedVals[fittedVals.length - 1].toFixed(2)}</strong>`;
+
+        }
+
+      });
+
+    }
+
+  }
+
+}
+
+
+
+/* ====================================================================
+
+   Axis Panning (Drag Axes)
+
+   ==================================================================== */
+
+function setupAxisDragHandles(cardId, myChart) {
+
+  const zr = myChart.getZr();
+
+  let draggingAxis = null;
+
+  let startPx = 0, startPy = 0;
+
+  let initialExtent = null;
+
+
+
+  function getCoordSys() {
+
+    const gridModel = myChart.getModel().getComponent('grid');
+
+    return gridModel ? gridModel.coordinateSystem : null;
+
+  }
+
+
+
+  function isOverYAxis(px, py) {
+
+    const coordSys = getCoordSys();
+
+    if (!coordSys) return false;
+
+    const rect = coordSys.getRect();
+
+    const axPos = cardAxisPositions[cardId] || { x: 'bottom', y: 'left' };
+
+    if (axPos.y === 'left' && px < rect.x && py >= rect.y && py <= rect.y + rect.height) return true;
+
+    if (axPos.y === 'right' && px > rect.x + rect.width && py >= rect.y && py <= rect.y + rect.height) return true;
+
+    return false;
+
+  }
+
+
+
+  function isOverXAxis(px, py) {
+
+    const coordSys = getCoordSys();
+
+    if (!coordSys) return false;
+
+    const rect = coordSys.getRect();
+
+    const axPos = cardAxisPositions[cardId] || { x: 'bottom', y: 'left' };
+
+    if (axPos.x === 'bottom' && py > rect.y + rect.height && px >= rect.x && px <= rect.x + rect.width) return true;
+
+    if (axPos.x === 'top' && py < rect.y && px >= rect.x && px <= rect.x + rect.width) return true;
+
+    return false;
+
+  }
+
+
+
+  function onMouseDown(e) {
+
+    const px = e.offsetX, py = e.offsetY;
+
+    if (isOverYAxis(px, py)) {
+
+      draggingAxis = 'y';
+
+      startPy = py;
+
+      const coordSys = getCoordSys();
+
+      initialExtent = coordSys.getAxis('y').scale.getExtent();
+
+      myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
+
+      if (e.event && e.event.preventDefault) e.event.preventDefault();
+
+    } else if (isOverXAxis(px, py)) {
+
+      draggingAxis = 'x';
+
+      startPx = px;
+
+      const coordSys = getCoordSys();
+
+      initialExtent = coordSys.getAxis('x').scale.getExtent();
+
+      myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
+
+      if (e.event && e.event.preventDefault) e.event.preventDefault();
+
+    }
+
+  }
+
+
+
+  function onMouseMove(e) {
+
+    const px = e.offsetX, py = e.offsetY;
+
+    if (!draggingAxis) {
+
+      if (isOverYAxis(px, py) || isOverXAxis(px, py)) {
+
+        myChart.getDom().style.cursor = 'move';
+
+        myChart.__isOverAxis = true;
+
+      } else if (myChart.__isOverAxis) {
+
+        myChart.getDom().style.cursor = '';
+
+        myChart.__isOverAxis = false;
+
+      }
+
+      return;
+
+    }
+
+
+
+    const coordSys = getCoordSys();
+
+    if (!coordSys) return;
+
+    const rect = coordSys.getRect();
+
+
+
+    if (draggingAxis === 'y') {
+
+      const yAxis = coordSys.getAxis('y');
+
+      const dy = py - startPy;
+
+      const isLog = yAxis.type === 'log';
+
+      let newMin, newMax;
+
+
+
+      if (isLog) {
+
+        const logMin = Math.log(initialExtent[0]);
+
+        const logMax = Math.log(initialExtent[1]);
+
+        const logRange = logMax - logMin;
+
+        const diff = (dy / rect.height) * logRange;
+
+        newMin = Math.exp(logMin + diff);
+
+        newMax = Math.exp(logMax + diff);
+
+      } else {
+
+        const range = initialExtent[1] - initialExtent[0];
+
+        const diff = (dy / rect.height) * range;
+
+        newMin = initialExtent[0] + diff;
+
+        newMax = initialExtent[1] + diff;
+
+      }
+
+
+
+      myChart.setOption({ yAxis: { min: newMin, max: newMax } });
+
+      cardZoomState[cardId] = cardZoomState[cardId] || {};
+
+      cardZoomState[cardId].yMin = newMin;
+
+      cardZoomState[cardId].yMax = newMax;
+
+    } else if (draggingAxis === 'x') {
+
+      const dx = px - startPx;
+
+      const range = initialExtent[1] - initialExtent[0];
+
+      const diff = -(dx / rect.width) * range;
+
+      const newMin = initialExtent[0] + diff;
+
+      const newMax = initialExtent[1] + diff;
+
+
+
+      myChart.setOption({ xAxis: { min: newMin, max: newMax } });
+
+      cardZoomState[cardId] = cardZoomState[cardId] || {};
+
+      cardZoomState[cardId].xMin = newMin;
+
+      cardZoomState[cardId].xMax = newMax;
+
+    }
+
+    if (e.event && e.event.preventDefault) e.event.preventDefault();
+
+  }
+
+
+
+  function onMouseUp() {
+
+    if (draggingAxis) {
+
+      draggingAxis = null;
+
+      myChart.getDom().style.cursor = '';
+
+      myChart.__isOverAxis = false;
+
+    }
+
+  }
+
+
+
+  if (myChart.__axisDragCleanup) myChart.__axisDragCleanup();
+
+
+
+  zr.on('mousedown', onMouseDown);
+
+  zr.on('mousemove', onMouseMove);
+
+  zr.on('mouseup', onMouseUp);
+
+  zr.on('globalout', onMouseUp);
+
+
+
+  myChart.__axisDragCleanup = () => {
+
+    zr.off('mousedown', onMouseDown);
+
+    zr.off('mousemove', onMouseMove);
+
+    zr.off('mouseup', onMouseUp);
+
+    zr.off('globalout', onMouseUp);
+
+    delete myChart.__axisDragCleanup;
+
+  };
 
 }
 
@@ -2857,11 +3749,59 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   if (firstW.params) { for (const [k, v] of Object.entries(firstW.params)) pHtml += `<span>${k}: <strong>${v}</strong></span>`; }
 
-  if (firstW.equation) { pHtml += `<span style="border-left:1px solid var(--border);padding-left:10px;margin-left:10px;color:var(--text);">Eq: <strong>${firstW.equation}</strong></span>`; }
-
   if (allWellsData.length > 1) pHtml += `<span>Wells: <strong>${allWellsData.length}</strong></span>`;
 
   paramDiv.innerHTML = pHtml;
+
+
+
+  /* --- Formula display below chart --- */
+
+  const formulaDiv = document.getElementById('formula-' + cardId);
+
+  if (formulaDiv && firstW.equation && firstW.params) {
+
+    const modelName = (data.model || '').toLowerCase();
+
+    let formulaHtml = '';
+
+    const p = firstW.params;
+
+    const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
+
+    if (modelName === 'exponential') {
+
+      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> &middot; e<sup>&minus;d<sub>i</sub>&middot;t</sup></span>`
+
+        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} &middot; e<sup>&minus;${fmt(p.di)}&middot;t</sup></span>`;
+
+    } else if (modelName === 'hyperbolic') {
+
+      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + b&middot;d<sub>i</sub>&middot;t)<sup>1/b</sup></span>`
+
+        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.b)}&middot;${fmt(p.di)}&middot;t)<sup>1/${fmt(p.b)}</sup></span>`;
+
+    } else if (modelName === 'harmonic') {
+
+      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + d<sub>i</sub>&middot;t)</span>`
+
+        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.di)}&middot;t)</span>`;
+
+    } else {
+
+      formulaHtml = `<span class="formula-fitted">${firstW.equation}</span>`;
+
+    }
+
+    formulaDiv.innerHTML = formulaHtml;
+
+    formulaDiv.style.display = '';
+
+  } else if (formulaDiv) {
+
+    formulaDiv.style.display = 'none';
+
+  }
 
 
 
@@ -2959,31 +3899,37 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   const isDate = firstW.is_date || false;
 
-  const xAxisType = isDate ? 'category' : 'value';
+  const xAxisType = isDate ? 'time' : 'value';
 
   const series = [];
 
-  const wellColors = ['#3b82f6', '#f59e0b', '#22c55e', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+  const wellColors = getPlotThemePalette(st.plotTheme);
 
 
 
-  let categoryData = undefined;
+  /* Compute date range for time axis */
+
+  let dateMin = Infinity, dateMax = -Infinity;
 
   if (isDate) {
 
-    const catSet = new Set();
+    allWellsData.forEach(w => {
 
-    allWellsData.forEach(w => { w.x.forEach(d => catSet.add(d)); });
+      w.x.forEach(d => { const ts = parseDateStr(d); if (ts < dateMin) dateMin = ts; if (ts > dateMax) dateMax = ts; });
 
-    allWellsData.forEach(w => { if (w.forecast && w.forecast.x) w.forecast.x.forEach(d => catSet.add(d)); });
-
-    categoryData = [...catSet].sort((a, b) => {
-
-      const pa = a.split('.'), pb = b.split('.');
-
-      return new Date(pa[2], pa[1] - 1, pa[0]) - new Date(pb[2], pb[1] - 1, pb[0]);
+      if (w.forecast && w.forecast.x) w.forecast.x.forEach(d => { const ts = parseDateStr(d); if (ts < dateMin) dateMin = ts; if (ts > dateMax) dateMax = ts; });
 
     });
+
+    /* Add a small padding (2% of range on each side) */
+
+    const dateRange = dateMax - dateMin;
+
+    const datePad = Math.max(dateRange * 0.02, 86400000); /* at least 1 day */
+
+    dateMin -= datePad;
+
+    dateMax += datePad;
 
   }
 
@@ -3011,35 +3957,25 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     if (isDate) {
 
-      const dateIdx = {};
-
-      categoryData.forEach((d, i) => dateIdx[d] = i);
-
-      const inY = Array(categoryData.length).fill(null);
-
-      const exY = Array(categoryData.length).fill(null);
+      const incD = [], exclD = [];
 
       for (let i = 0; i < actualLen; i++) {
 
-        const ci = dateIdx[w.x[i]];
+        const ts = parseDateStr(w.x[i]);
 
-        if (ci === undefined) continue;
+        const pt = [ts, w.y_actual[i], i];
 
-        if (isSingle && excluded.has(i)) { exY[ci] = w.y_actual[i]; }
+        if (isSingle && excluded.has(i)) exclD.push(pt);
 
-        else { inY[ci] = w.y_actual[i]; }
+        else incD.push(pt);
 
       }
 
-      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: inY });
+      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: incD });
 
-      if (isSingle && excluded.size > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exY });
+      if (isSingle && excluded.size > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
       if (w.y_fitted) {
-
-        const fitY = Array(categoryData.length).fill(null);
-
-        for (let i = 0; i < actualLen; i++) { const ci = dateIdx[w.x[i]]; if (ci !== undefined) fitY[ci] = w.y_fitted[i]; }
 
         series.push({
           name: prefix + 'Fitted',
@@ -3049,36 +3985,37 @@ function renderSingleChart(cardId, data, forecastMonths) {
           symbolSize: st.fittedSymbolSize,
           smooth: false,
           lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
-          data: fitY
+          itemStyle: { color: wFitColor },
+          data: w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]])
         });
 
       }
 
       if (hasForecast) {
 
-        const bridgeY = Array(categoryData.length).fill(null);
+        const bridgeArr = [];
 
-        if (w.y_fitted && w.y_fitted.length > 0) {
+        if (w.y_fitted && w.y_fitted.length > 0 && w.x.length > 0) {
 
-          let lastFitIdx = w.y_fitted.length - 1;
+          let lfi = w.y_fitted.length - 1;
 
-          while (lastFitIdx >= 0 && w.y_fitted[lastFitIdx] == null) lastFitIdx--;
+          while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--;
 
-          if (lastFitIdx >= 0) { const lastActualCi = dateIdx[w.x[lastFitIdx]]; if (lastActualCi !== undefined) bridgeY[lastActualCi] = w.y_fitted[lastFitIdx]; }
+          if (lfi >= 0) bridgeArr.push([parseDateStr(w.x[lfi]), w.y_fitted[lfi]]);
 
         }
 
-        const firstFcCi = dateIdx[w.forecast.x[0]];
-
-        if (firstFcCi !== undefined) bridgeY[firstFcCi] = w.forecast.y[0];
-
-        series.push({ name: prefix + '_bridge', type: 'line', showSymbol: false, smooth: false, lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth }, itemStyle: { color: wFcColor }, data: bridgeY, legendHoverLink: false });
-
-        const fcY = Array(categoryData.length).fill(null);
-
-        for (let i = 0; i < w.forecast.x.length; i++) { const ci = dateIdx[w.forecast.x[i]]; if (ci !== undefined) fcY[ci] = w.forecast.y[i]; }
-
-        series.push({ name: prefix + 'Forecast', type: 'line', showSymbol: st.forecastMarkers, symbol: st.forecastSymbol, symbolSize: st.forecastSymbolSize, smooth: false, lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth }, itemStyle: { color: wFcColor }, data: fcY });
+        series.push({
+          name: prefix + 'Forecast',
+          type: 'line',
+          showSymbol: st.forecastMarkers,
+          symbol: st.forecastSymbol,
+          symbolSize: st.forecastSymbolSize,
+          smooth: false,
+          lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth },
+          itemStyle: { color: wFcColor },
+          data: [...bridgeArr, ...w.forecast.x.map((xv, i) => [parseDateStr(xv), w.forecast.y[i]])]
+        });
 
       }
 
@@ -3101,6 +4038,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           symbolSize: st.fittedSymbolSize,
           smooth: false,
           lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
+          itemStyle: { color: wFitColor },
           data: w.x.map((xv, i) => [xv, w.y_fitted[i]])
         });
       }
@@ -3137,9 +4075,9 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
 
-      const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, isDate ? categoryData : null);
+      const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, null);
 
-      const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, isDate ? categoryData : null);
+      const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
 
       series.push({ name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false, lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: 'dashed' }, itemStyle: { color: P10_COLOR }, data: p10Data });
 
@@ -3157,7 +4095,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   userLines.forEach(ul => {
 
-    const mlDataItem = ul.type === 'h' ? { yAxis: ul.value } : { xAxis: isDate ? Math.round(ul.value) : ul.value };
+    const mlDataItem = ul.type === 'h' ? { yAxis: ul.value } : { xAxis: ul.value };
 
     series.push({
 
@@ -3191,7 +4129,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     const annotPoints = annotations.map(ann => {
 
-      const coord = isDate ? [Math.round(ann.x), ann.y] : [ann.x, ann.y];
+      const coord = [ann.x, ann.y];
 
       return {
 
@@ -3351,7 +4289,18 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     },
 
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: isDate ? function(params) {
+      if (!params || params.length === 0) return '';
+      let ts = params[0].axisValue;
+      let header = '<b>' + formatDateTs(ts) + '</b>';
+      params.forEach(p => {
+        if (p.seriesName && !p.seriesName.endsWith('_bridge') && !p.seriesName.startsWith('_')) {
+          let val = Array.isArray(p.data) ? p.data[1] : p.data;
+          if (val != null) header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
+        }
+      });
+      return header;
+    } : undefined },
 
     legend: { data: legendData, top: 4, left: 60, textStyle: { color: lbC, fontSize: 11 } },
 
@@ -3363,7 +4312,9 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       position: axPos.x,
 
-      data: isDate ? categoryData : undefined,
+      min: isDate ? dateMin : undefined,
+
+      max: isDate ? dateMax : undefined,
 
       name: customLabels.x || data.x_label,
 
@@ -3377,7 +4328,12 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       axisLine: { lineStyle: { color: axC } },
 
-      axisLabel: { color: lbC, rotate: isDate ? 45 : 0, fontSize: isDate ? 10 : 12, hideOverlap: true, showMinLabel: true, showMaxLabel: true }
+      splitNumber: isDate ? (parseInt(card.querySelector('.p-xlabels')?.value) || 8) : undefined,
+
+      axisLabel: {
+        color: lbC, rotate: isDate ? 45 : 0, fontSize: isDate ? 10 : 12, hideOverlap: true, showMinLabel: true, showMaxLabel: true,
+        formatter: isDate ? function(val) { return formatDateTs(val); } : undefined
+      }
 
     },
 
@@ -3425,7 +4381,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     myChart.setOption(zo);
 
-    const rb = document.getElementById('resetZoom-' + cardId); if (rb) rb.classList.add('show');
+    setResetZoomButtonsVisible(cardId, true);
 
   }
 
@@ -3463,9 +4419,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       let idx;
 
-      if (isDate) { idx = params.dataIndex; if (idx >= actualLen) return; }
-
-      else { idx = params.data && params.data[2]; }
+      idx = params.data && params.data[2];
 
       if (idx !== undefined && idx !== null) toggleExclusion(cardId, idx);
 
@@ -3507,9 +4461,21 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
 
+  /* Setup qi drag on the initial fitted point */
+
+  setupQiDragHandle(cardId, myChart);
+
+
+
   /* Setup user line dragging */
 
   setupUserLineDrag(cardId, myChart);
+
+
+
+  /* Setup explicit axis panning */
+
+  setupAxisDragHandles(cardId, myChart);
 
 
 
@@ -3589,6 +4555,14 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   ro.observe(chartDiv);
 
+  // Sync back to full view if it is open
+  const fullId = 'fullChart-' + cardId;
+  const fullChart = chartInstances[fullId];
+  if (fullChart) {
+    // Merge options properly avoiding axis reset anomalies or pass `true` to replace options
+    fullChart.setOption(option, true);
+  }
+
 }
 
 
@@ -3600,6 +4574,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
    ==================================================================== */
 
 let _activeSelection = null;
+
+function setResetZoomButtonsVisible(cardId, visible) {
+  const miniBtn = document.getElementById('resetZoom-' + cardId);
+  const fullBtn = document.getElementById('resetZoomFull-' + cardId);
+  if (miniBtn) miniBtn.classList.toggle('show', !!visible);
+  if (fullBtn) fullBtn.classList.toggle('show', !!visible);
+}
 
 
 
@@ -3755,7 +4736,14 @@ function applyZoom(chart, rect, mode, cardId) {
 
   cardZoomState[cardId] = { xMin: (mode === 'box' || mode === 'x') ? xMin : null, xMax: (mode === 'box' || mode === 'x') ? xMax : null, yMin: (mode === 'box' || mode === 'y') ? yMin : null, yMax: (mode === 'box' || mode === 'y') ? yMax : null };
 
-  const rb = document.getElementById('resetZoom-' + cardId); if (rb) rb.classList.add('show');
+  setResetZoomButtonsVisible(cardId, true);
+  
+  // Sync to parallel chart instances depending on which triggered the zoom
+  const fullId = 'fullChart-' + cardId;
+  const miniChart = chartInstances[cardId];
+  const fullChart = chartInstances[fullId];
+  if (chart === miniChart && fullChart) fullChart.setOption(opts);
+  if (chart === fullChart && miniChart) miniChart.setOption(opts);
 
 }
 
@@ -3766,10 +4754,13 @@ function resetZoom(cardId) {
   const chart = chartInstances[cardId], origOpt = cardOptions[cardId];
 
   if (chart && origOpt) chart.setOption({ xAxis: { min: origOpt.xAxis.min || null, max: origOpt.xAxis.max || null }, yAxis: { min: origOpt.yAxis.min || null, max: origOpt.yAxis.max || null } });
+  
+  const fullChart = chartInstances['fullChart-' + cardId];
+  if (fullChart && origOpt) fullChart.setOption({ xAxis: { min: origOpt.xAxis.min || null, max: origOpt.xAxis.max || null }, yAxis: { min: origOpt.yAxis.min || null, max: origOpt.yAxis.max || null } });
 
   delete cardZoomState[cardId];
 
-  const rb = document.getElementById('resetZoom-' + cardId); if (rb) rb.classList.remove('show');
+  setResetZoomButtonsVisible(cardId, false);
 
 }
 
@@ -3781,7 +4772,7 @@ function resetAll(cardId) {
 
   delete cardZoomState[cardId];
 
-  const rb = document.getElementById('resetZoom-' + cardId); if (rb) rb.classList.remove('show');
+  setResetZoomButtonsVisible(cardId, false);
 
   const ra = document.getElementById('resetAll-' + cardId); if (ra) ra.classList.remove('show');
 
@@ -3839,7 +4830,7 @@ function fitSelectionOnly(cardId, chart, selRect) {
 
     let xVal, yVal = w.y_actual[i];
 
-    if (isDate) { xVal = i; } else { xVal = w.x[i]; }
+    if (isDate) { xVal = parseDateStr(w.x[i]); } else { xVal = w.x[i]; }
 
     if (xVal < xMin || xVal > xMax || yVal < yMin || yVal > yMax) {
 
@@ -3911,7 +4902,7 @@ function excludeSelection(cardId, chart, selRect) {
 
     let xVal, yVal = w.y_actual[i];
 
-    if (isDate) { xVal = i; } else { xVal = w.x[i]; }
+    if (isDate) { xVal = parseDateStr(w.x[i]); } else { xVal = w.x[i]; }
 
     if (xVal >= xMin && xVal <= xMax && yVal >= yMin && yVal <= yMax) {
 
@@ -4005,6 +4996,15 @@ function reRenderChart(cardId) {
 
     renderSingleChart(cardId, cardLastData[cardId], months);
 
+    const fullId = 'fullChart-' + cardId;
+    if (chartInstances[fullId]) {
+      const fullChart = chartInstances[fullId];
+      const origOpts = chartInstances[cardId].getOption();
+      if (origOpts) {
+        fullChart.setOption(origOpts, true);
+      }
+    }
+
   }
 
 }
@@ -4014,16 +5014,22 @@ function reRenderChart(cardId) {
 /* --- Context Menu Show/Hide --- */
 
 document.addEventListener('contextmenu', function (e) {
-
-  const chartDiv = e.target.closest('.mini-chart');
-
+  const chartDiv = e.target.closest('.mini-chart, .modal-full-view-chart');
   if (!chartDiv) return;
 
   e.preventDefault();
 
-  const cardId = chartDiv.id.replace('chart-', '');
+  let cardId;
+  let chart;
 
-  const chart = chartInstances[cardId];
+  if (chartDiv.classList.contains('modal-full-view-chart')) {
+    const fullId = chartDiv.id;
+    cardId = fullId.replace('fullChart-', '');
+    chart = chartInstances[fullId];
+  } else {
+    cardId = chartDiv.id.replace('chart-', '');
+    chart = chartInstances[cardId];
+  }
 
   if (!chart) return;
 
@@ -4059,7 +5065,7 @@ document.addEventListener('contextmenu', function (e) {
 
     xType: xType,
 
-    xLabel: xType === 'category' ? (opt.xAxis[0].data[catIdx] || catIdx) : dataCoord[0]
+    xLabel: xType === 'category' ? (opt.xAxis[0].data[catIdx] || catIdx) : (xType === 'time' ? formatDateTs(dataCoord[0]) : dataCoord[0])
 
   };
 
@@ -4179,7 +5185,7 @@ function addUserLine(cardId, type) {
 
     ? (typeof value === 'number' ? value.toFixed(2) : value)
 
-    : (_ctxMenuCoord.xType === 'category' ? _ctxMenuCoord.xLabel : (typeof value === 'number' ? value.toFixed(2) : value));
+    : (_ctxMenuCoord.xType === 'category' ? _ctxMenuCoord.xLabel : (_ctxMenuCoord.xType === 'time' ? formatDateTs(value) : (typeof value === 'number' ? value.toFixed(2) : value)));
 
   const id = Date.now() + Math.floor(Math.random() * 1000);
 
@@ -4423,7 +5429,7 @@ document.addEventListener('mousedown', function (e) {
 
   if (!e.target.closest('#lineColorPopup')) document.getElementById('lineColorPopup').style.display = 'none';
 
-  if (!e.target.closest('#annotationPopup') && !e.target.closest('.mini-chart')) document.getElementById('annotationPopup').style.display = 'none';
+  if (!e.target.closest('#annotationPopup') && !e.target.closest('.mini-chart, .modal-full-view-chart')) document.getElementById('annotationPopup').style.display = 'none';
 
 });
 
@@ -4456,14 +5462,19 @@ function toggleLogScale(cardId) {
 /* --- Feature 6: Editable Axis Labels (double-click on axis) --- */
 
 document.addEventListener('dblclick', function (e) {
-
-  const chartDiv = e.target.closest('.mini-chart');
-
+  const chartDiv = e.target.closest('.mini-chart, .modal-full-view-chart');
   if (!chartDiv) return;
 
-  const cardId = chartDiv.id.replace('chart-', '');
-
-  const chart = chartInstances[cardId];
+  let cardId;
+  let chart;
+  if (chartDiv.classList.contains('modal-full-view-chart')) {
+    const fullId = chartDiv.id;
+    cardId = fullId.replace('fullChart-', '');
+    chart = chartInstances[fullId];
+  } else {
+    cardId = chartDiv.id.replace('chart-', '');
+    chart = chartInstances[cardId];
+  }
 
   if (!chart) return;
 
@@ -4547,7 +5558,7 @@ function finalizeAxisLabel(input) {
 /* ====================================================================
    Axis Hover Toolbar – Zoom, Fit, Range, Move
    ==================================================================== */
-const _axisToolbar = { cardId: null, axis: null, hideTimer: null };
+const _axisToolbar = { cardId: null, chartKey: null, axis: null, hideTimer: null };
 
 function setupAxisHoverTooltip(cardId, chartDiv) {
   if (chartDiv._axisHoverBound) return;
@@ -4555,9 +5566,11 @@ function setupAxisHoverTooltip(cardId, chartDiv) {
   const tb = document.getElementById('axisHoverToolbar');
 
   chartDiv.addEventListener('mousemove', function (e) {
-    const chart = chartInstances[cardId];
+    const isFullView = chartDiv.classList.contains('modal-full-view-chart');
+    const chartKey = isFullView ? chartDiv.id : cardId;
+    const chart = chartInstances[chartKey];
     if (!chart) return;
-    if (tb.classList.contains('show') && _axisToolbar.cardId === cardId) return; // don't reposition while open
+    if (tb.classList.contains('show') && _axisToolbar.chartKey === chartKey) return; // don't reposition while open
     const rect = chartDiv.getBoundingClientRect();
     const px = e.clientX - rect.left, py = e.clientY - rect.top;
     const h = rect.height, w = rect.width;
@@ -4570,7 +5583,7 @@ function setupAxisHoverTooltip(cardId, chartDiv) {
     if (!hitAxis && pos.y === 'right' && px > w - 65 && py > 30 && py < h - 40) hitAxis = 'y';
 
     if (hitAxis) {
-      _showAxisToolbar(cardId, hitAxis, e.clientX, e.clientY);
+      _showAxisToolbar(cardId, chartKey, hitAxis, e.clientX, e.clientY);
     } else {
       if (!tb.matches(':hover')) _hideAxisToolbar();
     }
@@ -4583,9 +5596,10 @@ function setupAxisHoverTooltip(cardId, chartDiv) {
   });
 }
 
-function _showAxisToolbar(cardId, axis, cx, cy) {
+function _showAxisToolbar(cardId, chartKey, axis, cx, cy) {
   const tb = document.getElementById('axisHoverToolbar');
   _axisToolbar.cardId = cardId;
+  _axisToolbar.chartKey = chartKey;
   _axisToolbar.axis = axis;
   clearTimeout(_axisToolbar.hideTimer);
   /* Position: for Y axis place it to the right of cursor, for X axis place it above */
@@ -4620,13 +5634,15 @@ function _hideAxisToolbar() {
     if (rp.style.display !== 'none') return; // keep open while range popup is shown
     tb.classList.remove('show');
     _axisToolbar.cardId = null;
+    _axisToolbar.chartKey = null;
     _axisToolbar.axis = null;
   }, 250);
 }
 
 /* --- Axis toolbar: zoom in/out on a single axis --- */
-function _axisZoom(cardId, axis, factor) {
-  const chart = chartInstances[cardId];
+function _axisZoom(cardId, axis, factor, chartKey) {
+  const activeKey = chartKey || cardId;
+  const chart = chartInstances[activeKey];
   if (!chart) return;
   const grid = chart.getModel().getComponent('grid', 0);
   if (!grid) return;
@@ -4654,17 +5670,23 @@ function _axisZoom(cardId, axis, factor) {
   if (axis === 'x') setObj.xAxis = { min: mn, max: mx };
   else setObj.yAxis = { min: mn, max: mx };
   chart.setOption(setObj);
+  const fullId = 'fullChart-' + cardId;
+  const miniChart = chartInstances[cardId];
+  const fullChart = chartInstances[fullId];
+  if (chart === miniChart && fullChart) fullChart.setOption(setObj);
+  if (chart === fullChart && miniChart) miniChart.setOption(setObj);
 
   /* Save zoom state */
   if (!cardZoomState[cardId]) cardZoomState[cardId] = {};
   if (axis === 'x') { cardZoomState[cardId].xMin = mn; cardZoomState[cardId].xMax = mx; }
   else { cardZoomState[cardId].yMin = mn; cardZoomState[cardId].yMax = mx; }
-  const rb = document.getElementById('resetZoom-' + cardId); if (rb) rb.classList.add('show');
+  setResetZoomButtonsVisible(cardId, true);
 }
 
 /* --- Axis toolbar: fit single axis to data --- */
-function _axisFit(cardId, axis) {
-  const chart = chartInstances[cardId], origOpt = cardOptions[cardId];
+function _axisFit(cardId, axis, chartKey) {
+  const activeKey = chartKey || cardId;
+  const chart = chartInstances[activeKey], origOpt = cardOptions[cardId];
   if (!chart || !origOpt) return;
   const setObj = {};
   if (axis === 'x') {
@@ -4675,17 +5697,23 @@ function _axisFit(cardId, axis) {
     if (cardZoomState[cardId]) { delete cardZoomState[cardId].yMin; delete cardZoomState[cardId].yMax; }
   }
   chart.setOption(setObj);
+  const fullId = 'fullChart-' + cardId;
+  const miniChart = chartInstances[cardId];
+  const fullChart = chartInstances[fullId];
+  if (chart === miniChart && fullChart) fullChart.setOption(setObj);
+  if (chart === fullChart && miniChart) miniChart.setOption(setObj);
   /* Hide reset button if no zoom remaining */
   const z = cardZoomState[cardId];
   if (!z || (z.xMin == null && z.xMax == null && z.yMin == null && z.yMax == null)) {
     delete cardZoomState[cardId];
-    const rb = document.getElementById('resetZoom-' + cardId); if (rb) rb.classList.remove('show');
+    setResetZoomButtonsVisible(cardId, false);
   }
 }
 
 /* --- Axis toolbar: show range popup --- */
-function _axisShowRange(cardId, axis) {
-  const chart = chartInstances[cardId];
+function _axisShowRange(cardId, axis, chartKey) {
+  const activeKey = chartKey || cardId;
+  const chart = chartInstances[activeKey];
   if (!chart) return;
   const tb = document.getElementById('axisHoverToolbar');
   const popup = document.getElementById('axisRangePopup');
@@ -4706,6 +5734,7 @@ function _axisShowRange(cardId, axis) {
   document.getElementById('axisRangeMin').value = (curMin != null && !isNaN(curMin)) ? +parseFloat(curMin).toFixed(4) : '';
   document.getElementById('axisRangeMax').value = (curMax != null && !isNaN(curMax)) ? +parseFloat(curMax).toFixed(4) : '';
   popup._cardId = cardId;
+  popup._chartKey = activeKey;
   popup._axis = axis;
   /* Position near toolbar */
   const tbRect = tb.getBoundingClientRect();
@@ -4740,13 +5769,13 @@ function _axisMoveToOpposite(cardId, axis) {
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       const action = this.dataset.action;
-      const cardId = _axisToolbar.cardId, axis = _axisToolbar.axis;
+      const cardId = _axisToolbar.cardId, chartKey = _axisToolbar.chartKey, axis = _axisToolbar.axis;
       if (!cardId || !axis) return;
       switch (action) {
-        case 'zoom-in': _axisZoom(cardId, axis, 0.5); break;
-        case 'zoom-out': _axisZoom(cardId, axis, 2.0); break;
-        case 'fit': _axisFit(cardId, axis); tb.classList.remove('show'); break;
-        case 'range': _axisShowRange(cardId, axis); break;
+        case 'zoom-in': _axisZoom(cardId, axis, 0.5, chartKey); break;
+        case 'zoom-out': _axisZoom(cardId, axis, 2.0, chartKey); break;
+        case 'fit': _axisFit(cardId, axis, chartKey); tb.classList.remove('show'); break;
+        case 'range': _axisShowRange(cardId, axis, chartKey); break;
         case 'move': _axisMoveToOpposite(cardId, axis); tb.classList.remove('show'); break;
       }
     });
@@ -4754,9 +5783,10 @@ function _axisMoveToOpposite(cardId, axis) {
 
   /* Range popup: Apply */
   document.getElementById('axisRangeOk').addEventListener('click', function () {
-    const cardId = rp._cardId, axis = rp._axis;
+    const cardId = rp._cardId, chartKey = rp._chartKey, axis = rp._axis;
     if (!cardId) return;
-    const chart = chartInstances[cardId];
+    const activeKey = chartKey || cardId;
+    const chart = chartInstances[activeKey];
     if (!chart) return;
     const mn = document.getElementById('axisRangeMin').value;
     const mx = document.getElementById('axisRangeMax').value;
@@ -4766,11 +5796,16 @@ function _axisMoveToOpposite(cardId, axis) {
     if (axis === 'x') setObj.xAxis = { min: minVal, max: maxVal };
     else setObj.yAxis = { min: minVal, max: maxVal };
     chart.setOption(setObj);
+    const fullId = 'fullChart-' + cardId;
+    const miniChart = chartInstances[cardId];
+    const fullChart = chartInstances[fullId];
+    if (chart === miniChart && fullChart) fullChart.setOption(setObj);
+    if (chart === fullChart && miniChart) miniChart.setOption(setObj);
     if (!cardZoomState[cardId]) cardZoomState[cardId] = {};
     if (axis === 'x') { cardZoomState[cardId].xMin = minVal; cardZoomState[cardId].xMax = maxVal; }
     else { cardZoomState[cardId].yMin = minVal; cardZoomState[cardId].yMax = maxVal; }
     if (minVal != null || maxVal != null) {
-      const rb = document.getElementById('resetZoom-' + cardId); if (rb) rb.classList.add('show');
+      setResetZoomButtonsVisible(cardId, true);
     }
     rp.style.display = 'none';
     tb.classList.remove('show');
@@ -4778,9 +5813,9 @@ function _axisMoveToOpposite(cardId, axis) {
 
   /* Range popup: Auto (reset) */
   document.getElementById('axisRangeReset').addEventListener('click', function () {
-    const cardId = rp._cardId, axis = rp._axis;
+    const cardId = rp._cardId, chartKey = rp._chartKey, axis = rp._axis;
     if (!cardId) return;
-    _axisFit(cardId, axis);
+    _axisFit(cardId, axis, chartKey);
     rp.style.display = 'none';
     tb.classList.remove('show');
   });
@@ -5146,6 +6181,8 @@ function saveWorkspaceToFile() {
 
       combine: isCombineMode(cardId),
 
+      combineAgg: getCombineAggMode(cardId),
+
       exclusions: [...(cardExclusions[cardId] || [])],
 
       styles: readCardStyles(cardId),
@@ -5232,11 +6269,15 @@ async function loadWorkspaceFromFile() {
 
         activePageId = cs.page || cs.workspace || pages[0].id;
 
-        const newId = addPlotCard(cs.well, cs.model, cs.forecast, cs.title, cs.combine || false);
+        const newId = addPlotCard(cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, '', cs.combineAgg || 'sum');
 
         if (cs.exclusions) cardExclusions[newId] = new Set(cs.exclusions);
 
-        if (cs.styles) applyStylesToCard(newId, cs.styles);
+        if (cs.styles) {
+          const mergedStyles = { ...getDefaultStyles(), ...cs.styles };
+          cardStyles[newId] = mergedStyles;
+          applyStylesToCard(newId, mergedStyles);
+        }
 
         if (cs.zoom) cardZoomState[newId] = cs.zoom;
 
@@ -6218,6 +7259,20 @@ function isCombineMode(cardId) {
 
 }
 
+function getCombineAggMode(cardId) {
+
+  const card = document.getElementById(cardId);
+
+  if (!card) return 'sum';
+
+  const value = card.querySelector('.p-combine-agg')?.value || 'sum';
+
+  const allowed = new Set(['sum', 'mean', 'median', 'min', 'max']);
+
+  return allowed.has(value) ? value : 'sum';
+
+}
+
 
 
 // Close well picker when clicking outside
@@ -6820,7 +7875,7 @@ function setupUserLineDrag(cardId, myChart) {
 
           dragging.lineObj.value = dataCoord[0];
 
-          const displayVal = typeof dataCoord[0] === 'number' ? dataCoord[0].toFixed(2) : dataCoord[0];
+          const displayVal = xType === 'time' ? formatDateTs(dataCoord[0]) : (typeof dataCoord[0] === 'number' ? dataCoord[0].toFixed(2) : dataCoord[0]);
 
           dragging.lineObj.name = 'V: ' + displayVal;
 
@@ -6906,6 +7961,7 @@ function _collectWorkspaceState() {
       title: card.querySelector('.p-title')?.value || '',
       header: card.querySelector('.p-header')?.value || '',
       combine: card.querySelector('.p-combine')?.checked || false,
+      combineAgg: card.querySelector('.p-combine-agg')?.value || 'sum',
       styles: cardStyles[cid] || null,
       exclusions: cardExclusions[cid] ? [...cardExclusions[cid]] : [],
       userLines: cardUserLines[cid] || [],
@@ -7131,7 +8187,7 @@ async function loadWorkspace() {
 
     // Restore cards
     for (const c of state.cards) {
-      const cardId = addPlotCard(c.wells, c.model, c.forecast, c.title, c.combine, c.header);
+      const cardId = addPlotCard(c.wells, c.model, c.forecast, c.title, c.combine, c.header, c.combineAgg || 'sum');
 
       const cardEl = document.getElementById(cardId);
       if (cardEl) cardEl.dataset.page = c.pageId;
@@ -7149,12 +8205,13 @@ async function loadWorkspace() {
       if (c.pCurveState) cardPCurveState[cardId] = c.pCurveState;
 
       if (c.styles) {
-        cardStyles[cardId] = c.styles;
-        applyStylesToCard(cardId, c.styles);
+        const mergedStyles = { ...getDefaultStyles(), ...c.styles };
+        cardStyles[cardId] = mergedStyles;
+        applyStylesToCard(cardId, mergedStyles);
         const headerEl = cardEl?.querySelector('.p-header');
-        if (headerEl && c.styles.headerFontSize) {
-          headerEl.style.fontSize = c.styles.headerFontSize + 'rem';
-          headerEl.style.color = c.styles.headerColor || '';
+        if (headerEl && mergedStyles.headerFontSize) {
+          headerEl.style.fontSize = mergedStyles.headerFontSize + 'rem';
+          headerEl.style.color = mergedStyles.headerColor || '';
         }
       }
 

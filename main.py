@@ -539,11 +539,12 @@ async def decline_curve_analysis(
     forecast_months: float = Query(0, description="Months to forecast"),
     exclude_indices: str = Query("", description="Comma-separated indices to exclude from fitting"),
     combine: bool = Query(False, description="If true, sum y-values of selected wells by time period"),
+    combine_func: str = Query("sum", description="Combine aggregation: sum|mean|median|min|max"),
 ):
     """
     Perform Decline Curve Analysis.
     Returns actual production data + fitted decline curves per well + forecast.
-    If combine=true, sums y-values of all selected wells grouped by the x column
+    If combine=true, aggregates y-values of all selected wells grouped by the x column
     and returns a single combined "well" for DCA.
     """
     if _current_df is None:
@@ -566,12 +567,25 @@ async def decline_curve_analysis(
     # Check if x column is already a datetime (parsed at upload time)
     is_date = pd.api.types.is_datetime64_any_dtype(_current_df[x])
 
-    # ---- Combine mode: sum y-values across selected wells by time ----
+    agg_map = {
+        "sum": "sum",
+        "mean": "mean",
+        "avg": "mean",
+        "median": "median",
+        "min": "min",
+        "max": "max",
+    }
+    combine_func_norm = (combine_func or "sum").strip().lower()
+    agg_func = agg_map.get(combine_func_norm)
+    if agg_func is None:
+        raise HTTPException(status_code=400, detail="Invalid combine_func. Use sum|mean|median|min|max")
+
+    # ---- Combine mode: aggregate y-values across selected wells by time ----
     if combine and len(well_list) > 1:
         masks = _current_df[well_col].astype(str).isin(well_list)
         combined = _current_df.loc[masks, [x, y]].dropna().copy()
         combined[y] = pd.to_numeric(combined[y], errors='coerce').fillna(0.0)
-        combined = combined.groupby(x, sort=True)[y].sum().reset_index()
+        combined = combined.groupby(x, sort=True)[y].agg(agg_func).reset_index()
         combined = combined.sort_values(x).reset_index(drop=True)
         # Treat as a single "well" named after all combined wells
         combined_name = ' + '.join(well_list)

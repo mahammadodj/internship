@@ -1069,7 +1069,7 @@ button.btn-sm {
   border-radius: var(--radius);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
   padding: 4px 0;
-  z-index: 1000;
+  z-index: 10006;
   min-width: 180px;
   display: none;
 }
@@ -1602,6 +1602,31 @@ button.btn-sm {
 
 .well-picker-combine input {
   accent-color: var(--accent);
+}
+
+.well-picker-agg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: .76rem;
+  color: var(--text-dim);
+}
+
+.well-picker-agg-row select {
+  min-width: 110px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: .76rem;
+}
+
+.well-picker-agg-row select:disabled {
+  opacity: .55;
 }
 
 .well-picker-list {
@@ -2160,4 +2185,74 @@ button.btn-sm {
   opacity: 0.5;
   font-weight: 400 !important;
   font-style: italic;
+}
+
+/* ── Formula Display ── */
+.formula-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  margin: 4px 12px 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: 'Cambria Math', 'Latin Modern Math', 'STIX Two Math', Georgia, serif;
+}
+.formula-display .formula-generic {
+  font-size: 1.1rem;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+.formula-display .formula-fitted {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+}
+.formula-display sub,
+.formula-display sup {
+  font-size: 0.75em;
+}
+/* --- Full View Modal --- */
+.modal-full-view {
+  width: 90vw;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .4);
+}
+
+.modal-full-view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.modal-full-view-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal-full-view-content {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.modal-full-view-chart {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
 }
