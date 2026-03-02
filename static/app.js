@@ -60,6 +60,22 @@ document.getElementById('themeToggle').addEventListener('click', function () {
 
   }
 
+  /* Re-render all charts so ECharts picks up the new theme and label colours */
+
+  requestAnimationFrame(() => {
+
+    Object.keys(cardLastData).forEach(cardId => {
+
+      if (cardLastData[cardId]) {
+
+        reRenderChart(cardId);
+
+      }
+
+    });
+
+  });
+
 });
 
 
@@ -98,6 +114,7 @@ const cardUserLines = {};    // { cardId: [{id, type:'h'|'v', value, color, name
 const cardAnnotations = {};  // { cardId: [{id, x, y, xLabel, text, fontSize}] }
 const cardValueLabels = {};  // { cardId: 'none'|'top'|'bottom'|'left'|'right' }
 const cardLogScale = {};     // { cardId: boolean }
+const cardLogScaleX = {};    // { cardId: boolean }  – X-axis log scale
 
 /* Parse date string "DD.MM.YYYY" → JS timestamp */
 function parseDateStr(s) {
@@ -115,6 +132,7 @@ const cardAxisLabels = {};   // { cardId: {x:string, y:string} }
 const cardAxisPositions = {}; // { cardId: {x:'bottom'|'top', y:'left'|'right'} }
 const cardTableData = {};    // { cardId: [{well, section, time, actual, fitted}] }
 const cardTableSort = {};    // { cardId: {col:string, asc:boolean} }
+const cardTableFilter = {};  // { cardId: {well:string, section:string} }
 const cardHeaders = {};      // { cardId: string }
 let _ctxMenuCardId = null;
 let _ctxMenuCoord = null;
@@ -1210,50 +1228,25 @@ function drawHistogram(canvasId, hist) {
 
 /* ====================================================================
 
-   Selectors
+   Selectors  (per-card — column selectors are on each plot card)
 
    ==================================================================== */
 
+// Legacy stubs for backward compatibility (no-ops)
+const pageColumns = {};
+function getPageColumns(pageId) { return { selX: '', selY: '', selWellCol: '', allWells: [] }; }
+function getActivePageColumns() { return getPageColumns(activePageId); }
+function populatePageSelectors(pageId) { /* no-op: columns are per-card now */ }
+function createPageColumnsUI(pageId) { /* no-op: columns are per-card now */ }
+async function fetchWellsForPage(pageId) { /* no-op: wells are fetched per-card now */ }
+
 function populateSelectors() {
-
-  const selX = document.getElementById('selX');
-
-  const selY = document.getElementById('selY');
-
-  const selWellCol = document.getElementById('selWellCol');
-
-  selX.innerHTML = '<option value="">— select —</option>';
-
-  selY.innerHTML = '<option value="">— select —</option>';
-
-  selWellCol.innerHTML = '<option value="">— select —</option>';
-
-  [...numericColumns, ...uploadedColumns.filter(c => !numericColumns.includes(c))].forEach(c => selX.innerHTML += `<option value="${c}">${c}</option>`);
-
-  numericColumns.forEach(c => selY.innerHTML += `<option value="${c}">${c}</option>`);
-
-  const catCols = uploadedColumns.filter(c => !numericColumns.includes(c));
-
-  [...catCols, ...numericColumns].forEach(c => selWellCol.innerHTML += `<option value="${c}">${c}</option>`);
-
-  selWellCol.onchange = fetchWells;
-
+  // After data upload, re-populate column selectors on all existing cards
+  populateAllCardColumnSelectors();
 }
 
-
-
 async function fetchWells() {
-
-  const wellCol = document.getElementById('selWellCol').value;
-
-  if (!wellCol) { allWells = []; return; }
-
-  const res = await fetch(`/api/wells?well_col=${encodeURIComponent(wellCol)}`);
-
-  const data = await res.json();
-
-  allWells = data.wells || [];
-
+  // no-op: wells are fetched per-card now
 }
 
 
@@ -1283,6 +1276,8 @@ function addPage(name) {
   const id = 'page-' + Date.now();
 
   pages.push({ id, name });
+
+  createPageColumnsUI(id);
 
   renderPageTabs();
 
@@ -1372,6 +1367,11 @@ function deletePage(pageId) {
 
   document.querySelectorAll(`.plot-card[data-page="${pageId}"]`).forEach(card => removeCard(card.id));
 
+  // Remove page columns UI
+  const colsEl = document.getElementById('pageCols-' + pageId);
+  if (colsEl) colsEl.remove();
+  delete pageColumns[pageId];
+
   const idx = pages.findIndex(p => p.id === pageId);
 
   if (idx >= 0) pages.splice(idx, 1);
@@ -1388,6 +1388,7 @@ function switchPage(pageId) {
 
   activePageId = pageId;
 
+  // Show/hide plot cards
   document.querySelectorAll('.plot-card').forEach(card => {
 
     card.style.display = card.dataset.page === pageId ? '' : 'none';
@@ -1514,23 +1515,68 @@ const container = document.getElementById('plotsContainer');
 
 
 
+function populateCardColumnSelectors(cardId, presetX, presetY, presetWellCol) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const selX = card.querySelector('.p-selX');
+  const selY = card.querySelector('.p-selY');
+  const selWellCol = card.querySelector('.p-selWellCol');
+  if (!selX || !selY || !selWellCol) return;
+
+  selX.innerHTML = '<option value="">— select —</option>';
+  selY.innerHTML = '<option value="">— select —</option>';
+  selWellCol.innerHTML = '<option value="">— select —</option>';
+
+  // X: all columns (numeric first, then categorical)
+  [...numericColumns, ...uploadedColumns.filter(c => !numericColumns.includes(c))].forEach(c => {
+    selX.innerHTML += `<option value="${c}">${c}</option>`;
+  });
+  // Y: numeric columns
+  numericColumns.forEach(c => {
+    selY.innerHTML += `<option value="${c}">${c}</option>`;
+  });
+  // Well column: categorical first, then numeric
+  const catCols = uploadedColumns.filter(c => !numericColumns.includes(c));
+  [...catCols, ...numericColumns].forEach(c => {
+    selWellCol.innerHTML += `<option value="${c}">${c}</option>`;
+  });
+
+  if (presetX) selX.value = presetX;
+  if (presetY) selY.value = presetY;
+  if (presetWellCol) selWellCol.value = presetWellCol;
+}
+
+// Re-populate column selectors on all existing cards (after new data upload)
+function populateAllCardColumnSelectors() {
+  document.querySelectorAll('.plot-card').forEach(card => {
+    const curX = card.querySelector('.p-selX')?.value || '';
+    const curY = card.querySelector('.p-selY')?.value || '';
+    const curW = card.querySelector('.p-selWellCol')?.value || '';
+    populateCardColumnSelectors(card.id, curX, curY, curW);
+  });
+}
+
+
 function addPlotCardToActive() {
-
-  if (!document.getElementById('selX').value || !document.getElementById('selY').value || !document.getElementById('selWellCol').value) {
-
-    alert('Please select Time, Rate, and Well columns first.');
-
+  if (uploadedColumns.length === 0) {
+    alert('Please upload a dataset first.');
     return;
-
   }
-
+  // Prevent adding a new card if any existing card has no plot yet
+  const existingCards = container.querySelectorAll('.plot-card');
+  for (const c of existingCards) {
+    if (!chartInstances[c.id]) {
+      alert('Please create a plot for the existing card before adding a new one.');
+      c.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+  }
   addPlotCard();
-
 }
 
 
 
-function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, presetCombine, presetHeader, presetCombineAgg) {
+function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, presetCombine, presetHeader, presetCombineAgg, presetSelX, presetSelY, presetSelWellCol) {
 
   const cardId = 'card-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
 
@@ -1569,6 +1615,16 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
     </div>
 
     <div class="plot-header">
+
+      <div class="control-group"><label>X Axis</label>
+        <select class="p-selX"><option value="">— select —</option></select>
+      </div>
+      <div class="control-group"><label>Y Axis</label>
+        <select class="p-selY"><option value="">— select —</option></select>
+      </div>
+      <div class="control-group"><label>Well Column</label>
+        <select class="p-selWellCol"><option value="">— select —</option></select>
+      </div>
 
       <div class="control-group"><label>Well(s)</label>
 
@@ -1637,122 +1693,84 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
     </div>
 
     <div class="style-panel" id="style-${cardId}">
-      <div class="style-row">
-        <span class="style-label">Plot Theme</span>
-        <select class="s-plot-theme">
-          <option value="classic">Classic</option>
-          <option value="ocean">Ocean</option>
-          <option value="sunset">Sunset</option>
-          <option value="forest">Forest</option>
-          <option value="mono">Mono</option>
-          <option value="custom">Custom</option>
-        </select>
+      <div class="style-section">
+        <div class="style-section-title">Data Series</div>
+        <div class="style-row">
+          <span class="style-label">Actual Pts</span>
+          <input type="color" class="s-actual-color" value="#3b82f6">
+          <select class="s-actual-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
+          <input type="range" class="s-actual-size" min="2" max="20" value="6" title="Size">
+          <span class="s-actual-size-val style-range-val">6</span>
+        </div>
+        <div class="style-row">
+          <span class="style-label">Fitted Curve</span>
+          <input type="color" class="s-fitted-color" value="#f59e0b">
+          <select class="s-fitted-style"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
+          <input type="range" class="s-fitted-width" min="1" max="6" value="2" title="Width">
+          <span class="s-fitted-width-val style-range-val">2</span>
+        </div>
+        <div class="style-row">
+          <span class="style-label">Fitted Markers</span>
+          <label class="style-check"><input type="checkbox" class="s-fitted-markers"> Show</label>
+          <select class="s-fitted-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle" selected>▲ Triangle</option></select>
+          <input type="range" class="s-fitted-msize" min="2" max="20" value="6" title="Size">
+          <span class="s-fitted-msize-val style-range-val">6</span>
+        </div>
       </div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:4px 0;">
-
-      <div class="style-row">
-
-        <span class="style-label">Actual Pts</span>
-
-        <input type="color" class="s-actual-color" value="#3b82f6">
-
-        <select class="s-actual-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
-
-        <input type="range" class="s-actual-size" min="2" max="20" value="6" title="Size">
-
-        <span class="s-actual-size-val" style="font-size:.7rem;color:var(--text-dim);width:20px;">6</span>
-
+      <div class="style-section">
+        <div class="style-section-title">Forecast</div>
+        <div class="style-row">
+          <span class="style-label">Forecast</span>
+          <input type="color" class="s-forecast-color" value="#22c55e">
+          <select class="s-forecast-style"><option value="solid">Solid</option><option value="dashed" selected>Dashed</option><option value="dotted">Dotted</option></select>
+          <input type="range" class="s-forecast-width" min="1" max="6" value="2" title="Width">
+          <span class="s-forecast-width-val style-range-val">2</span>
+        </div>
+        <div class="style-row">
+          <span class="style-label">Fcst Markers</span>
+          <label class="style-check"><input type="checkbox" class="s-forecast-markers"> Show</label>
+          <label class="style-check"><input type="checkbox" class="s-forecast-labels"> Labels</label>
+          <select class="s-forecast-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
+          <input type="range" class="s-forecast-msize" min="2" max="20" value="8" title="Size">
+          <span class="s-forecast-msize-val style-range-val">8</span>
+        </div>
       </div>
-
-      <div class="style-row">
-
-        <span class="style-label">Fitted Curve</span>
-
-        <input type="color" class="s-fitted-color" value="#f59e0b">
-
-        <select class="s-fitted-style"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
-
-        <input type="range" class="s-fitted-width" min="1" max="6" value="2" title="Width">
-
-        <span class="s-fitted-width-val" style="font-size:.7rem;color:var(--text-dim);width:20px;">2</span>
-
+      <div class="style-section">
+        <div class="style-section-title">Uncertainty Curves</div>
+        <div class="style-row">
+          <span class="style-label">P10 Curve</span>
+          <input type="color" class="s-p10-color" value="#22c55e">
+          <label class="style-check"><input type="checkbox" class="s-p10-line" checked> Line</label>
+          <label class="style-check"><input type="checkbox" class="s-p10-marker"> Markers</label>
+          <label class="style-check"><input type="checkbox" class="s-p10-labels"> Labels</label>
+        </div>
+        <div class="style-row">
+          <span class="style-label">P90 Curve</span>
+          <input type="color" class="s-p90-color" value="#ef4444">
+          <label class="style-check"><input type="checkbox" class="s-p90-line" checked> Line</label>
+          <label class="style-check"><input type="checkbox" class="s-p90-marker"> Markers</label>
+          <label class="style-check"><input type="checkbox" class="s-p90-labels"> Labels</label>
+        </div>
       </div>
-
-      <div class="style-row">
-
-        <span class="style-label">Fitted Markers</span>
-
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-fitted-markers"> Show</label>
-
-        <select class="s-fitted-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle" selected>▲ Triangle</option></select>
-
-        <input type="range" class="s-fitted-msize" min="2" max="20" value="6" title="Size">
-
-        <span class="s-fitted-msize-val" style="font-size:.7rem;color:var(--text-dim);width:20px;">6</span>
-
-      </div>
-
-      <div class="style-row">
-
-        <span class="style-label">Forecast</span>
-
-        <input type="color" class="s-forecast-color" value="#22c55e">
-
-        <select class="s-forecast-style"><option value="solid">Solid</option><option value="dashed" selected>Dashed</option><option value="dotted">Dotted</option></select>
-
-        <input type="range" class="s-forecast-width" min="1" max="6" value="2" title="Width">
-
-        <span class="s-forecast-width-val" style="font-size:.7rem;color:var(--text-dim);width:20px;">2</span>
-
-      </div>
-
-      <div class="style-row">
-
-        <span class="style-label">Fcst Markers</span>
-
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-forecast-markers"> Show</label>
-
-        <select class="s-forecast-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
-
-        <input type="range" class="s-forecast-msize" min="2" max="20" value="8" title="Size">
-
-        <span class="s-forecast-msize-val" style="font-size:.7rem;color:var(--text-dim);width:20px;">8</span>
-
-      </div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:4px 0;">
-      <div class="style-row">
-        <span class="style-label">P10 Curve</span>
-        <input type="color" class="s-p10-color" value="#22c55e">
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-p10-line" checked> Line</label>
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-p10-marker"> Markers</label>
-      </div>
-      <div class="style-row">
-        <span class="style-label">P90 Curve</span>
-        <input type="color" class="s-p90-color" value="#ef4444">
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-p90-line" checked> Line</label>
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-p90-marker"> Markers</label>
-      </div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:4px 0;">
-      <div class="style-row">
-        <span class="style-label">Gridlines</span>
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-grid-x" checked> Horizontal</label>
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-grid-y" checked> Vertical</label>
-      </div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:4px 0;">
-      <div class="style-row">
-        <span class="style-label">Section Header</span>
-        <input type="color" class="s-header-color" value="#334155" title="Color">
-        <input type="range" class="s-header-fsize" min="0.8" max="4.0" step="0.1" value="1.8" title="Size">
-        <span class="s-header-fsize-val" style="font-size:.7rem;color:var(--text-dim);width:20px;">1.8</span>
-      </div>
-      <div class="style-row">
-        <span class="style-label">&nbsp;</span>
-        <label style="font-size:.78rem;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" class="s-header-bold"> Bold</label>
-        <select class="s-header-align" style="margin-left:8px;">
-          <option value="left">Left</option>
-          <option value="center">Center</option>
-          <option value="right">Right</option>
-        </select>
+      <div class="style-section">
+        <div class="style-section-title">Layout</div>
+        <div class="style-row">
+          <span class="style-label">Gridlines</span>
+          <label class="style-check"><input type="checkbox" class="s-grid-x" checked> Horizontal</label>
+          <label class="style-check"><input type="checkbox" class="s-grid-y" checked> Vertical</label>
+        </div>
+        <div class="style-row">
+          <span class="style-label">Section Header</span>
+          <input type="color" class="s-header-color" value="#334155" title="Color">
+          <input type="range" class="s-header-fsize" min="0.8" max="4.0" step="0.1" value="1.8" title="Size">
+          <span class="s-header-fsize-val style-range-val">1.8</span>
+          <label class="style-check"><input type="checkbox" class="s-header-bold"> Bold</label>
+          <select class="s-header-align">
+            <option value="left">Left</option>
+            <option value="center">Center</option>
+            <option value="right">Right</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -1788,9 +1806,21 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div id="forecastTableSection-${cardId}" style="display:none;">
         <div class="data-table-toolbar">
-          <span class="dt-title">📊 Data Table</span>
-          <div style="display:flex;gap:6px;">
-            <button onclick="downloadTableCSV('${cardId}')" title="Download as CSV">↓ CSV</button>
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="dt-title">📊 Data Table</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span class="dt-row-count" id="dtRowCount-${cardId}"></span>
+              <button onclick="downloadTableCSV('${cardId}')" title="Download as CSV">↓ CSV</button>
+            </div>
+          </div>
+          <div class="dt-filter-row">
+            <input class="dt-filter-input" type="text" placeholder="🔍 Filter well..." oninput="filterTable('${cardId}')" id="dtFilterWell-${cardId}">
+            <select class="dt-filter-select" onchange="filterTable('${cardId}')" id="dtFilterSection-${cardId}">
+              <option value="">All sections</option>
+              <option value="Actual">Actual</option>
+              <option value="Forecast">Forecast</option>
+            </select>
+            <button class="dt-filter-clear" onclick="clearTableFilter('${cardId}')" title="Clear filters">✕</button>
           </div>
         </div>
         <div class="table-wrap" id="forecastTable-${cardId}" style="max-height:250px; border:1px solid var(--border);"></div>
@@ -1802,7 +1832,35 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
   container.appendChild(card);
 
+  // ─── Populate per-card column selectors ───
+  populateCardColumnSelectors(cardId, presetSelX, presetSelY, presetSelWellCol);
 
+  // Wire well-column change → fetch wells for this card
+  const cardSelWellCol = card.querySelector('.p-selWellCol');
+  if (cardSelWellCol) {
+    cardSelWellCol.addEventListener('change', async () => {
+      const wellCol = cardSelWellCol.value;
+      if (!wellCol) {
+        populateWellPicker(cardId, []);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/wells?well_col=${encodeURIComponent(wellCol)}`);
+        const data = await res.json();
+        const wells = data.wells || [];
+        // Store wells on the card element for reference
+        card._cardWells = wells;
+        populateWellPicker(cardId, [], wells);
+      } catch (e) {
+        console.warn('Failed to fetch wells for card', cardId, e);
+      }
+      if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+    });
+  }
+  const cardSelX = card.querySelector('.p-selX');
+  if (cardSelX) cardSelX.addEventListener('change', () => { if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave(); });
+  const cardSelY = card.querySelector('.p-selY');
+  if (cardSelY) cardSelY.addEventListener('change', () => { if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave(); });
 
   // Populate the custom well picker and set combine checkbox
 
@@ -1917,7 +1975,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 function getDefaultStyles() {
 
-  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 6, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 6, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 2, forecastMarkers: false, forecastSymbol: 'circle', forecastSymbolSize: 8, p10Color: '#22c55e', p10Line: true, p10Marker: false, p90Color: '#ef4444', p90Line: true, p90Marker: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: '#334155', headerFontWeight: 'normal', headerTextAlign: 'left' };
+  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 6, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 6, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 2, forecastMarkers: false, forecastLabels: false, forecastSymbol: 'circle', forecastSymbolSize: 8, p10Color: '#22c55e', p10Line: true, p10Marker: false, p10Labels: false, p90Color: '#ef4444', p90Line: true, p90Marker: false, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: '#334155', headerFontWeight: 'normal', headerTextAlign: 'left' };
 }
 
 const PLOT_THEME_PRESETS = {
@@ -1999,6 +2057,8 @@ function readCardStyles(cardId) {
 
     forecastMarkers: card.querySelector('.s-forecast-markers')?.checked || false,
 
+    forecastLabels: card.querySelector('.s-forecast-labels')?.checked || false,
+
     forecastSymbol: card.querySelector('.s-forecast-symbol')?.value || 'circle',
 
     forecastSymbolSize: parseInt(card.querySelector('.s-forecast-msize')?.value || '8'),
@@ -2009,11 +2069,15 @@ function readCardStyles(cardId) {
 
     p10Marker: card.querySelector('.s-p10-marker')?.checked || false,
 
+    p10Labels: card.querySelector('.s-p10-labels')?.checked || false,
+
     p90Color: card.querySelector('.s-p90-color')?.value || '#ef4444',
 
     p90Line: card.querySelector('.s-p90-line')?.checked !== false,
 
     p90Marker: card.querySelector('.s-p90-marker')?.checked || false,
+
+    p90Labels: card.querySelector('.s-p90-labels')?.checked || false,
 
     gridX: card.querySelector('.s-grid-x')?.checked !== false,
 
@@ -2083,6 +2147,8 @@ function applyStylesToCard(cardId, styles) {
 
   const fcm = card.querySelector('.s-forecast-markers'); if (fcm) fcm.checked = merged.forecastMarkers || false;
 
+  const fcl = card.querySelector('.s-forecast-labels'); if (fcl) fcl.checked = merged.forecastLabels || false;
+
   s('.s-forecast-symbol', merged.forecastSymbol);
 
   s('.s-forecast-msize', merged.forecastSymbolSize);
@@ -2093,11 +2159,15 @@ function applyStylesToCard(cardId, styles) {
 
   const p10m = card.querySelector('.s-p10-marker'); if (p10m) p10m.checked = merged.p10Marker || false;
 
+  const p10lb = card.querySelector('.s-p10-labels'); if (p10lb) p10lb.checked = merged.p10Labels || false;
+
   s('.s-p90-color', merged.p90Color || '#ef4444');
 
   const p90l = card.querySelector('.s-p90-line'); if (p90l) p90l.checked = merged.p90Line !== false;
 
   const p90m = card.querySelector('.s-p90-marker'); if (p90m) p90m.checked = merged.p90Marker || false;
+
+  const p90lb = card.querySelector('.s-p90-labels'); if (p90lb) p90lb.checked = merged.p90Labels || false;
 
   const gx = card.querySelector('.s-grid-x'); if (gx) gx.checked = merged.gridX !== false;
 
@@ -2131,7 +2201,7 @@ function removeCard(id) {
 
   delete cardUserLines[id]; delete cardAnnotations[id]; delete cardValueLabels[id];
 
-  delete cardLogScale[id]; delete cardPctChange[id]; delete cardAxisLabels[id]; delete cardAxisPositions[id];
+  delete cardLogScale[id]; delete cardLogScaleX[id]; delete cardPctChange[id]; delete cardAxisLabels[id]; delete cardAxisPositions[id];
 
   const el = document.getElementById(id);
 
@@ -2164,12 +2234,11 @@ async function runSingleDCA(cardId) {
   const combineAgg = getCombineAggMode(cardId);
 
   if (!well) { alert('Please select at least one well.'); return; }
-
-  const xVal = document.getElementById('selX').value;
-
-  const yVal = document.getElementById('selY').value;
-
-  const wellCol = document.getElementById('selWellCol').value;
+  // Get column selections from the card's own selectors
+  const xVal = card.querySelector('.p-selX')?.value || '';
+  const yVal = card.querySelector('.p-selY')?.value || '';
+  const wellCol = card.querySelector('.p-selWellCol')?.value || '';
+  if (!xVal || !yVal || !wellCol) { alert('Please select X Axis, Y Axis, and Well Column on this card.'); return; }
 
   const btn = card.querySelector('.btn');
 
@@ -3903,6 +3972,12 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   const series = [];
 
+  const pointLabelFormatter = function (params) {
+    let val = Array.isArray(params.data) ? params.data[1] : params.data;
+    if (val == null) return '';
+    return typeof val === 'number' ? val.toFixed(1) : val;
+  };
+
   const wellColors = getPlotThemePalette(st.plotTheme);
 
 
@@ -4014,6 +4089,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth },
           itemStyle: { color: wFcColor },
+          label: st.forecastLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: [...bridgeArr, ...w.forecast.x.map((xv, i) => [parseDateStr(xv), w.forecast.y[i]])]
         });
 
@@ -4049,7 +4125,12 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         if (w.y_fitted && w.y_fitted.length > 0 && w.x.length > 0) { let lfi = w.y_fitted.length - 1; while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--; if (lfi >= 0) bridgeArr.push([w.x[lfi], w.y_fitted[lfi]]); }
 
-        series.push({ name: prefix + 'Forecast', type: 'line', showSymbol: st.forecastMarkers, symbol: st.forecastSymbol, symbolSize: st.forecastSymbolSize, smooth: false, lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth }, itemStyle: { color: wFcColor }, data: [...bridgeArr, ...w.forecast.x.map((xv, i) => [xv, w.forecast.y[i]])] });
+        series.push({
+          name: prefix + 'Forecast', type: 'line', showSymbol: st.forecastMarkers, symbol: st.forecastSymbol, symbolSize: st.forecastSymbolSize, smooth: false,
+          lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth }, itemStyle: { color: wFcColor },
+          label: st.forecastLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+          data: [...bridgeArr, ...w.forecast.x.map((xv, i) => [xv, w.forecast.y[i]])]
+        });
 
       }
 
@@ -4079,9 +4160,19 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
 
-      series.push({ name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false, lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: 'dashed' }, itemStyle: { color: P10_COLOR }, data: p10Data });
+      series.push({
+        name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
+        lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: 'dashed' }, itemStyle: { color: P10_COLOR },
+        label: st.p10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+        data: p10Data
+      });
 
-      series.push({ name: prefix + 'P90 (Di=' + p90DiRound + ')', type: 'line', z: 1, showSymbol: p90ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false, lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: 'dashed' }, itemStyle: { color: P90_COLOR }, data: p90Data });
+      series.push({
+        name: prefix + 'P90 (Di=' + p90DiRound + ')', type: 'line', z: 1, showSymbol: p90ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
+        lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: 'dashed' }, itemStyle: { color: P90_COLOR },
+        label: st.p90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+        data: p90Data
+      });
 
     }
 
@@ -4141,7 +4232,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
           show: true, formatter: ann.text, position: 'top', fontSize: ann.fontSize || 12,
 
-          color: ann.color || (isLight ? '#0f172a' : '#e2e8f0'),
+          color: ann.color || (isLight ? '#0f172a' : '#f8fafc'),
 
           backgroundColor: isLight ? 'rgba(255,255,255,.92)' : 'rgba(34,37,51,.92)',
 
@@ -4185,15 +4276,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
           formatter: function (params) {
 
-            let val = Array.isArray(params.data) ? params.data[1] : params.data;
-
-            if (val == null) return '';
-
-            return typeof val === 'number' ? val.toFixed(1) : val;
+            return pointLabelFormatter(params);
 
           },
 
-          fontSize: 9, color: isLight ? '#475569' : '#94a3b8'
+          fontSize: 9, color: isLight ? '#475569' : '#e2e8f0'
 
         };
 
@@ -4222,6 +4309,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
   const customLabels = cardAxisLabels[cardId] || {};
 
   const useLogScale = cardLogScale[cardId] || false;
+  const useLogScaleX = (cardLogScaleX[cardId] || false) && !isDate; // X log only for numeric axes
 
 
 
@@ -4289,18 +4377,14 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     },
 
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: isDate ? function(params) {
-      if (!params || params.length === 0) return '';
-      let ts = params[0].axisValue;
-      let header = '<b>' + formatDateTs(ts) + '</b>';
-      params.forEach(p => {
-        if (p.seriesName && !p.seriesName.endsWith('_bridge') && !p.seriesName.startsWith('_')) {
-          let val = Array.isArray(p.data) ? p.data[1] : p.data;
-          if (val != null) header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
-        }
-      });
+    tooltip: { trigger: 'item', axisPointer: { type: 'cross', lineStyle: { color: 'var(--text-dim, #999)', type: 'dashed' } }, formatter: function(p) {
+      if (!p || p.seriesName.endsWith('_bridge') || p.seriesName.startsWith('_')) return '';
+      let val = Array.isArray(p.data) ? p.data[1] : p.data;
+      if (val == null) return '';
+      let header = isDate ? '<b>' + formatDateTs(Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>' : '<b>' + (Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>';
+      header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
       return header;
-    } : undefined },
+    } },
 
     legend: { data: legendData, top: 4, left: 60, textStyle: { color: lbC, fontSize: 11 } },
 
@@ -4308,11 +4392,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     xAxis: {
 
-      type: xAxisType,
+      type: useLogScaleX ? 'log' : xAxisType,
 
       position: axPos.x,
 
-      min: isDate ? dateMin : undefined,
+      min: useLogScaleX ? 0.01 : (isDate ? dateMin : undefined),
 
       max: isDate ? dateMax : undefined,
 
@@ -5079,6 +5163,10 @@ document.addEventListener('contextmenu', function (e) {
 
   if (logItem) logItem.innerHTML = '<span class="ccm-icon">㏒</span> ' + (isLog ? '✓ Y-Axis Log Scale' : '　Y-Axis Log Scale');
 
+  const isLogX = cardLogScaleX[cardId] || false;
+  const logXItem = menu.querySelector('[data-action="log-scale-x"]');
+  if (logXItem) logXItem.innerHTML = '<span class="ccm-icon">㏒</span> ' + (isLogX ? '✓ X-Axis Log Scale' : '　X-Axis Log Scale');
+
   const showPct = cardPctChange[cardId] || false;
 
   const pctItem = menu.querySelector('[data-action="pct-change"]');
@@ -5146,6 +5234,8 @@ document.querySelectorAll('#chartCtxMenu > .ccm-item[data-action]').forEach(item
     else if (action === 'pct-change') togglePctChange(_ctxMenuCardId);
 
     else if (action === 'log-scale') toggleLogScale(_ctxMenuCardId);
+
+    else if (action === 'log-scale-x') toggleLogScaleX(_ctxMenuCardId);
 
     hideChartCtxMenu();
 
@@ -5311,9 +5401,11 @@ document.getElementById('lineColorDel').addEventListener('click', function () {
 
 /* --- Feature 2: Annotations --- */
 
-function addAnnotationPrompt(cardId) {
+function addAnnotationPrompt(cardId, coord) {
 
-  if (!_ctxMenuCoord) return;
+  const annCoord = coord || _ctxMenuCoord;
+
+  if (!annCoord) return;
 
   const text = prompt('Enter annotation text:');
 
@@ -5325,13 +5417,13 @@ function addAnnotationPrompt(cardId) {
 
     id: Date.now() + Math.floor(Math.random() * 1000),
 
-    x: _ctxMenuCoord.x,
+    x: annCoord.x,
 
-    y: _ctxMenuCoord.y,
+    y: annCoord.y,
 
-    xLabel: _ctxMenuCoord.xLabel,
+    xLabel: annCoord.xLabel,
 
-    xType: _ctxMenuCoord.xType,
+    xType: annCoord.xType,
 
     text, fontSize: 12,
 
@@ -5457,6 +5549,13 @@ function toggleLogScale(cardId) {
 
 }
 
+/* --- Feature 5b: Log Scale X-axis (numeric only) --- */
+
+function toggleLogScaleX(cardId) {
+  cardLogScaleX[cardId] = !cardLogScaleX[cardId];
+  reRenderChart(cardId);
+}
+
 
 
 /* --- Feature 6: Editable Axis Labels (double-click on axis) --- */
@@ -5493,6 +5592,23 @@ document.addEventListener('dblclick', function (e) {
   /* If click is near Y axis area */
 
   if ((pos.y === 'left' && px < 65) || (pos.y === 'right' && px > w - 65)) { showAxisLabelInput(cardId, 'y', e.clientX, e.clientY); return; }
+
+  if (!chart.containPixel('grid', [px, py])) return;
+
+  const opt = chart.getOption();
+  const xType = opt?.xAxis?.[0]?.type;
+  let dataCoord;
+  if (xType === 'category') dataCoord = chart.convertFromPixel({ seriesIndex: 0 }, [px, py]);
+  else dataCoord = chart.convertFromPixel('grid', [px, py]);
+  if (!dataCoord) return;
+  const catIdx = Math.round(dataCoord[0]);
+  const annCoord = {
+    x: dataCoord[0],
+    y: dataCoord[1],
+    xType: xType,
+    xLabel: xType === 'category' ? (opt.xAxis[0].data[catIdx] || catIdx) : (xType === 'time' ? formatDateTs(dataCoord[0]) : dataCoord[0])
+  };
+  addAnnotationPrompt(cardId, annCoord);
 
 });
 
@@ -6144,16 +6260,15 @@ async function exportCSV() {
 function saveWorkspaceToFile() {
 
   const currentPage = pages.find(p => p.id === activePageId);
-
   const state = {
 
-    selX: document.getElementById('selX').value,
+    selX: '',
 
-    selY: document.getElementById('selY').value,
+    selY: '',
 
-    selWellCol: document.getElementById('selWellCol').value,
+    selWellCol: '',
 
-    pages: currentPage ? [currentPage] : [],
+    pages: currentPage ? [{ ...currentPage }] : [],
 
     activePageId: activePageId,
 
@@ -6172,6 +6287,12 @@ function saveWorkspaceToFile() {
       page: activePageId,
 
       well: getSelectedWells(cardId),
+
+      selX: card.querySelector('.p-selX')?.value || '',
+
+      selY: card.querySelector('.p-selY')?.value || '',
+
+      selWellCol: card.querySelector('.p-selWellCol')?.value || '',
 
       model: card.querySelector('.p-model')?.value || 'exponential',
 
@@ -6229,17 +6350,10 @@ async function loadWorkspaceFromFile() {
 
       const state = JSON.parse(text);
 
-      // Restore column selectors
-
-      if (state.selX) document.getElementById('selX').value = state.selX;
-
-      if (state.selY) document.getElementById('selY').value = state.selY;
-
-      if (state.selWellCol) { document.getElementById('selWellCol').value = state.selWellCol; await fetchWells(); }
-
-      // Clear existing cards and restore pages
-
+      // Clear existing cards and pages
       document.querySelectorAll('.plot-card').forEach(card => removeCard(card.id));
+      // Remove existing page column UIs
+      document.querySelectorAll('.page-columns-card').forEach(el => el.remove());
 
       pages.length = 0;
 
@@ -6249,19 +6363,23 @@ async function loadWorkspaceFromFile() {
 
       if (savedPages.length > 0) {
 
-        savedPages.forEach(pg => pages.push({ id: pg.id, name: pg.name }));
+        for (const pg of savedPages) {
+          pages.push({ id: pg.id, name: pg.name });
+        }
 
       } else {
 
-        pages.push({ id: 'page-legacy', name: 'Page 1' });
+        const legacyId = 'page-legacy';
+        pages.push({ id: legacyId, name: 'Page 1' });
 
       }
 
       activePageId = state.activePageId || state.activeWsId || pages[0].id;
+      if (!pages.some(p => p.id === activePageId)) activePageId = pages[0].id;
 
       renderPageTabs();
 
-      // Recreate cards in their pages
+      // Recreate cards in their pages with per-card column selections
 
       for (const cs of (state.cards || [])) {
 
@@ -6269,7 +6387,21 @@ async function loadWorkspaceFromFile() {
 
         activePageId = cs.page || cs.workspace || pages[0].id;
 
-        const newId = addPlotCard(cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, '', cs.combineAgg || 'sum');
+        // Determine per-card columns (backward compat: fall back to page/global)
+        const cardSelX = cs.selX || state.selX || '';
+        const cardSelY = cs.selY || state.selY || '';
+        const cardSelWellCol = cs.selWellCol || state.selWellCol || '';
+
+        // Fetch wells for this card's well column
+        if (cardSelWellCol) {
+          try {
+            const res = await fetch(`/api/wells?well_col=${encodeURIComponent(cardSelWellCol)}`);
+            const data = await res.json();
+            allWells = data.wells || [];
+          } catch(e) { allWells = []; }
+        }
+
+        const newId = addPlotCard(cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, '', cs.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol);
 
         if (cs.exclusions) cardExclusions[newId] = new Set(cs.exclusions);
 
@@ -7127,7 +7259,7 @@ window.addEventListener('resize', () => Object.values(chartInstances).forEach(c 
 
 
 
-function populateWellPicker(cardId, selectedWells) {
+function populateWellPicker(cardId, selectedWells, customWellsList) {
 
   const wp = document.getElementById('wp-' + cardId);
 
@@ -7137,7 +7269,9 @@ function populateWellPicker(cardId, selectedWells) {
 
   list.innerHTML = '';
 
-  allWells.forEach(w => {
+  const wells = customWellsList || allWells;
+
+  wells.forEach(w => {
 
     const label = document.createElement('label');
 
@@ -7471,11 +7605,41 @@ function renderSortableTable(cardId) {
 
   const sortState = cardTableSort[cardId] || { col: null, asc: true };
 
+  const filterState = cardTableFilter[cardId] || { well: '', section: '' };
 
+  // Apply filters
+
+  const wellQ = (filterState.well || '').trim().toLowerCase();
+
+  const sectionQ = filterState.section || '';
+
+  const filtered = rows.filter(r => {
+
+    if (wellQ && !String(r.well).toLowerCase().includes(wellQ)) return false;
+
+    if (sectionQ && r.section !== sectionQ) return false;
+
+    return true;
+
+  });
+
+  // Update row count badge
+
+  const countEl = document.getElementById('dtRowCount-' + cardId);
+
+  if (countEl) {
+
+    const isFiltered = wellQ || sectionQ;
+
+    countEl.textContent = isFiltered ? `${filtered.length} / ${rows.length} rows` : `${rows.length} rows`;
+
+    countEl.style.color = isFiltered ? 'var(--accent)' : 'var(--text-muted)';
+
+  }
 
   // Sort rows if a sort column is set
 
-  const sorted = [...rows];
+  const sorted = [...filtered];
 
   if (sortState.col) {
 
@@ -7572,6 +7736,40 @@ function sortTable(cardId, colKey) {
   else { st.col = colKey; st.asc = true; }
 
   cardTableSort[cardId] = st;
+
+  renderSortableTable(cardId);
+
+}
+
+function filterTable(cardId) {
+
+  const wellEl = document.getElementById('dtFilterWell-' + cardId);
+
+  const secEl  = document.getElementById('dtFilterSection-' + cardId);
+
+  cardTableFilter[cardId] = {
+
+    well: wellEl ? wellEl.value : '',
+
+    section: secEl ? secEl.value : ''
+
+  };
+
+  renderSortableTable(cardId);
+
+}
+
+function clearTableFilter(cardId) {
+
+  const wellEl = document.getElementById('dtFilterWell-' + cardId);
+
+  const secEl  = document.getElementById('dtFilterSection-' + cardId);
+
+  if (wellEl) wellEl.value = '';
+
+  if (secEl)  secEl.value  = '';
+
+  cardTableFilter[cardId] = { well: '', section: '' };
 
   renderSortableTable(cardId);
 
@@ -7956,6 +8154,9 @@ function _collectWorkspaceState() {
       cardId: cid,
       pageId: card.dataset.page,
       wells: wells,
+      selX: card.querySelector('.p-selX')?.value || '',
+      selY: card.querySelector('.p-selY')?.value || '',
+      selWellCol: card.querySelector('.p-selWellCol')?.value || '',
       model: card.querySelector('.p-model')?.value || 'exponential',
       forecast: card.querySelector('.p-forecast')?.value || '0',
       title: card.querySelector('.p-title')?.value || '',
@@ -7968,6 +8169,7 @@ function _collectWorkspaceState() {
       annotations: cardAnnotations[cid] || [],
       valueLabels: cardValueLabels[cid] || 'none',
       logScale: cardLogScale[cid] || false,
+      logScaleX: cardLogScaleX[cid] || false,
       pctChange: cardPctChange[cid] || false,
       axisLabels: cardAxisLabels[cid] || null,
       axisPositions: cardAxisPositions[cid] || null,
@@ -7978,16 +8180,18 @@ function _collectWorkspaceState() {
   });
 
   return {
-    version: 1,
+    version: 2,
     savedAt: Date.now(),
-    selX: document.getElementById('selX')?.value || '',
-    selY: document.getElementById('selY')?.value || '',
-    selWellCol: document.getElementById('selWellCol')?.value || '',
+    selX: '',
+    selY: '',
+    selWellCol: '',
     uploadedColumns: uploadedColumns,
     numericColumns: numericColumns,
     allWells: allWells,
     activeDatasetId: activeDatasetId,
-    pages: pages.map(p => ({ id: p.id, name: p.name })),
+    pages: pages.map(p => {
+      return { id: p.id, name: p.name };
+    }),
     activePageId: activePageId,
     cards: cards,
     theme: document.documentElement.getAttribute('data-theme') || '',
@@ -8139,15 +8343,6 @@ async function loadWorkspace() {
     if (serverHasData) {
       // Restore Import Data tab from server
       await _restoreImportTab();
-
-      // Fetch wells for the saved well column
-      if (state.selWellCol) {
-        try {
-          const wRes = await fetch('/api/wells?well_col=' + encodeURIComponent(state.selWellCol));
-          const wData = await wRes.json();
-          allWells = wData.wells || [];
-        } catch (e) { allWells = state.allWells || []; }
-      }
     } else {
       if (state.uploadedColumns?.length > 0) {
         uploadedColumns = state.uploadedColumns;
@@ -8167,16 +8362,24 @@ async function loadWorkspace() {
       if (tb) tb.textContent = state.theme === 'light' ? '\u2600\uFE0F Light' : '\uD83C\uDF19 Dark';
     }
 
-    // Restore column selections
-    if (state.selX) { const el = document.getElementById('selX'); if (el) el.value = state.selX; }
-    if (state.selY) { const el = document.getElementById('selY'); if (el) el.value = state.selY; }
-    if (state.selWellCol) { const el = document.getElementById('selWellCol'); if (el) el.value = state.selWellCol; }
+    // Remove existing page column UIs
+    document.querySelectorAll('.page-columns-card').forEach(el => el.remove());
 
-    // Restore pages
+    // Restore pages (columns are now per-card, not per-page)
     pages.length = 0;
-    (state.pages || []).forEach(p => pages.push({ id: p.id, name: p.name }));
-    if (pages.length === 0) pages.push({ id: 'page-default', name: 'Page 1' });
-    activePageId = state.activePageId || pages[0].id;
+    const savedPages = state.pages || [];
+    if (savedPages.length > 0) {
+      for (const p of savedPages) {
+        pages.push({ id: p.id, name: p.name });
+      }
+    }
+    if (pages.length === 0) {
+      const defId = 'page-default';
+      pages.push({ id: defId, name: 'Page 1' });
+    }
+    // Ensure activePageId matches an existing page
+    const candidateId = state.activePageId || pages[0].id;
+    activePageId = pages.some(p => p.id === candidateId) ? candidateId : pages[0].id;
     renderPageTabs();
 
     // Remove existing cards
@@ -8185,18 +8388,40 @@ async function loadWorkspace() {
       card.remove();
     });
 
-    // Restore cards
+    // Restore cards with per-card column selections
     for (const c of state.cards) {
-      const cardId = addPlotCard(c.wells, c.model, c.forecast, c.title, c.combine, c.header, c.combineAgg || 'sum');
+      const cardPageId = c.pageId || activePageId;
+      const savedActive = activePageId;
+      activePageId = cardPageId;
+
+      // Determine per-card column selections (backward compat: fall back to page/global columns)
+      const cardSelX = c.selX || (state.pages?.find(p => p.id === cardPageId)?.selX) || state.selX || '';
+      const cardSelY = c.selY || (state.pages?.find(p => p.id === cardPageId)?.selY) || state.selY || '';
+      const cardSelWellCol = c.selWellCol || (state.pages?.find(p => p.id === cardPageId)?.selWellCol) || state.selWellCol || '';
+
+      // Fetch wells for this card's well column if needed
+      if (cardSelWellCol && serverHasData) {
+        try {
+          const res = await fetch(`/api/wells?well_col=${encodeURIComponent(cardSelWellCol)}`);
+          const data = await res.json();
+          allWells = data.wells || [];
+        } catch(e) { allWells = state.allWells || []; }
+      } else {
+        allWells = state.allWells || [];
+      }
+
+      const cardId = addPlotCard(c.wells, c.model, c.forecast, c.title, c.combine, c.header, c.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol);
 
       const cardEl = document.getElementById(cardId);
-      if (cardEl) cardEl.dataset.page = c.pageId;
+      if (cardEl) cardEl.dataset.page = cardPageId;
+      activePageId = savedActive;
 
       if (c.exclusions?.length) cardExclusions[cardId] = new Set(c.exclusions);
       if (c.userLines?.length) cardUserLines[cardId] = c.userLines;
       if (c.annotations?.length) cardAnnotations[cardId] = c.annotations;
       if (c.valueLabels && c.valueLabels !== 'none') cardValueLabels[cardId] = c.valueLabels;
       if (c.logScale) cardLogScale[cardId] = true;
+      if (c.logScaleX) cardLogScaleX[cardId] = true;
       if (c.pctChange) cardPctChange[cardId] = true;
       if (c.axisLabels) cardAxisLabels[cardId] = c.axisLabels;
       if (c.axisPositions) cardAxisPositions[cardId] = c.axisPositions;
@@ -8300,10 +8525,7 @@ reRenderChart = function (cardId) {
   _debouncedAutoSave();
 };
 
-['selX', 'selY', 'selWellCol'].forEach(id => {
-  const el = document.getElementById(id);
-  if (el) el.addEventListener('change', _debouncedAutoSave);
-});
+// Per-card column selectors auto-save is handled in addPlotCard change handlers
 
 document.getElementById('themeToggle')?.addEventListener('click', () => {
   setTimeout(_debouncedAutoSave, 200);

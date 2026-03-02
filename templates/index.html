@@ -7,7 +7,7 @@
   <title>DCA Pro – Decline Curve Analysis</title>
   <script src="/static/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=4" />
 </head>
 
 <body>
@@ -198,20 +198,6 @@
 
   <!-- TAB 3: DCA -->
   <div id="tab-dca" class="tab-content">
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-title"><span class="dot"></span> Dataset Columns</div>
-      <div class="controls">
-        <div class="control-group"><label>Time / X Axis</label><select id="selX">
-            <option value="">— load data —</option>
-          </select></div>
-        <div class="control-group"><label>Rate / Y Axis</label><select id="selY">
-            <option value="">— load data —</option>
-          </select></div>
-        <div class="control-group"><label>Well Name Column</label><select id="selWellCol">
-            <option value="">— load data —</option>
-          </select></div>
-      </div>
-    </div>
     <div class="page-bar" id="pageBar">
       <div class="page-tabs" id="pageTabs"></div>
       <button class="page-add" onclick="addPagePrompt()" title="New Page">+</button>
@@ -272,6 +258,7 @@
     <div class="ccm-item" data-action="pct-change"><span class="ccm-icon">Δ</span> Show % Change &amp; Diff</div>
     <div class="ccm-divider"></div>
     <div class="ccm-item" data-action="log-scale"><span class="ccm-icon">㏒</span> Y-Axis Log Scale</div>
+    <div class="ccm-item" data-action="log-scale-x"><span class="ccm-icon">㏒</span> X-Axis Log Scale</div>
   </div>
 
   <!-- Line Color Picker Popup -->
@@ -370,7 +357,7 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 
 </html>
