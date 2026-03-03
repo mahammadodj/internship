@@ -37,7 +37,8 @@ _worker_pool = ThreadPoolExecutor(max_workers=2)
 # Version control: dataset_id -> list of version dicts (newest last)
 # Each version: {version, parquet_path, timestamp, rows, columns, status}
 _versions: dict = {}
-MAX_VERSIONS = 5   # keep last N versions per dataset
+MAX_VERSIONS = 50  # keep last N versions per dataset
+_active_version: int = 0   # which version is currently loaded (0 = latest)
 
 # Derived columns / transformations registry (for pipeline replay)
 # dataset_id -> [{"name": "col", "formula": "expr"}, ...]
@@ -54,6 +55,153 @@ _current_file_suffix: str = ""
 _file_disk_path: Optional[str] = None   # path on disk for auto-reload
 _file_last_modified: float = 0
 _last_import_timestamp: Optional[str] = None  # ISO timestamp of last import
+
+_META_FILE = STORAGE_DIR / "_meta.json"
+
+
+def _save_active_meta():
+    """Persist the active dataset metadata so the server can reload it on restart."""
+    meta = {
+        "active_dataset_id": _active_dataset_id,
+        "filename": _current_filename,
+        "date_columns": _date_columns,
+        "last_import_timestamp": _last_import_timestamp,
+        "file_disk_path": _file_disk_path,
+        "active_version": _active_version,
+    }
+    try:
+        _META_FILE.write_text(json.dumps(meta, indent=2))
+    except Exception as e:
+        print(f"Warning: Could not save active meta: {e}")
+
+
+def _load_active_dataset_on_startup():
+    """Reload the last active dataset from disk when the server starts."""
+    global _current_df, _current_filename, _date_columns
+    global _current_file_bytes, _current_file_suffix, _file_disk_path
+    global _active_dataset_id, _last_import_timestamp, _file_last_modified
+    global _active_version
+
+    if not _META_FILE.exists():
+        return
+
+    try:
+        meta = json.loads(_META_FILE.read_text())
+    except Exception:
+        return
+
+    ds_id = meta.get("active_dataset_id")
+    if not ds_id:
+        return
+
+    ds_dir = STORAGE_DIR / ds_id
+    parquet_path = ds_dir / "data.parquet"
+    if not parquet_path.exists():
+        return
+
+    # Find the raw file to recover bytes and suffix
+    raw_files = [f for f in ds_dir.iterdir() if f.name.startswith("raw")]
+    suffix = ".csv"
+    raw_bytes = b""
+    if raw_files:
+        suffix = raw_files[0].suffix
+        raw_bytes = raw_files[0].read_bytes()
+
+    try:
+        table = pq.read_table(str(parquet_path))
+        df = table.to_pandas()
+
+        # Re-detect date columns from meta
+        date_columns = meta.get("date_columns", [])
+        for col in date_columns:
+            if col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[col]):
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+
+        _current_df = df
+        _current_filename = meta.get("filename", "restored.csv")
+        _date_columns = date_columns
+        _current_file_bytes = raw_bytes
+        _current_file_suffix = suffix
+        _active_dataset_id = ds_id
+        _last_import_timestamp = meta.get("last_import_timestamp")
+        _active_version = meta.get("active_version", 0)
+        _file_disk_path = meta.get("file_disk_path")
+        if _file_disk_path and Path(_file_disk_path).exists():
+            _file_last_modified = Path(_file_disk_path).stat().st_mtime
+        else:
+            _file_last_modified = 0
+
+        # Rebuild _datasets registry entry
+        _datasets[ds_id] = {
+            "status": "ready",
+            "filename": _current_filename,
+            "suffix": suffix,
+            "file_size": len(raw_bytes),
+            "raw_path": str(raw_files[0]) if raw_files else "",
+            "parquet_path": str(parquet_path),
+            "error": None,
+            "progress": 100,
+            "bytes_received": len(raw_bytes),
+            "rows": len(df),
+            "columns": list(df.columns),
+            "numeric_columns": list(df.select_dtypes(include="number").columns),
+            "date_columns": date_columns,
+        }
+
+        # Rebuild version entries from existing version files
+        ver_files = sorted(ds_dir.glob("data_v*.parquet"))
+        _versions[ds_id] = []
+        for vf in ver_files:
+            try:
+                ver_num = int(vf.stem.replace("data_v", ""))
+                vt = pq.read_table(str(vf))
+                _versions[ds_id].append({
+                    "version": ver_num,
+                    "parquet_path": str(vf),
+                    "timestamp": datetime.fromtimestamp(vf.stat().st_mtime, tz=timezone.utc).isoformat(),
+                    "rows": vt.num_rows,
+                    "columns": vt.column_names,
+                    "status": "ok",
+                })
+            except Exception:
+                pass
+
+        print(f"Restored dataset '{_current_filename}' ({len(df)} rows) from {ds_id}")
+
+        # Cleanup orphan folders from previous sessions
+        for child in STORAGE_DIR.iterdir():
+            if child.is_dir() and child.name != ds_id:
+                try:
+                    shutil.rmtree(child)
+                    print(f"  Cleaned up orphan folder: {child.name}")
+                except Exception:
+                    pass
+
+    except Exception as e:
+        print(f"Warning: Failed to restore dataset on startup: {e}")
+
+
+# Run on module load
+_load_active_dataset_on_startup()
+
+
+def _persist_current_df():
+    """Write the current in-memory DataFrame back to the active dataset's parquet file."""
+    if _current_df is None or not _active_dataset_id:
+        return
+    ds_dir = STORAGE_DIR / _active_dataset_id
+    parquet_path = ds_dir / "data.parquet"
+    if not ds_dir.exists():
+        return
+    try:
+        export_df = _current_df.copy()
+        for col in _date_columns:
+            if col in export_df.columns and pd.api.types.is_datetime64_any_dtype(export_df[col]):
+                export_df[col] = export_df[col].dt.strftime('%Y-%m-%d %H:%M:%S').fillna("")
+        table = pa.Table.from_pandas(export_df, preserve_index=False)
+        pq.write_table(table, str(parquet_path), compression='snappy')
+    except Exception as e:
+        print(f"Warning: Could not persist DataFrame to parquet: {e}")
 
 
 def _parse_data(raw_bytes: bytes, suffix: str):
@@ -101,6 +249,7 @@ def _build_upload_response():
         "last_import": _last_import_timestamp,
         "dataset_id": _active_dataset_id,
         "version": _get_current_version_number(),
+        "derived_columns": _derived_columns.get(_active_dataset_id, []) if _active_dataset_id else [],
     })
 
 
@@ -108,11 +257,14 @@ def _get_current_version_number():
     """Return the current version number for the active dataset."""
     if not _active_dataset_id or _active_dataset_id not in _versions:
         return 0
+    if _active_version > 0:
+        return _active_version
     return len(_versions[_active_dataset_id])
 
 
 def _save_version_snapshot(dataset_id: str, df: pd.DataFrame, date_columns: list):
     """Save a versioned copy of the Parquet file and record metadata."""
+    global _active_version
     ds = _datasets.get(dataset_id)
     if not ds:
         return
@@ -147,6 +299,7 @@ def _save_version_snapshot(dataset_id: str, df: pd.DataFrame, date_columns: list
     if dataset_id not in _versions:
         _versions[dataset_id] = []
     _versions[dataset_id].append(ver_entry)
+    _active_version = ver_num  # new snapshot is always the current version
 
     # Prune old versions
     while len(_versions[dataset_id]) > MAX_VERSIONS:
@@ -169,6 +322,8 @@ def _replay_derived_columns(dataset_id: str, df: pd.DataFrame):
     for d in derivations:
         try:
             df[d["name"]] = df.eval(d["formula"])
+            if pd.api.types.is_numeric_dtype(df[d["name"]]):
+                df[d["name"]] = df[d["name"]].round(4)
         except Exception as e:
             errors.append({"name": d["name"], "error": str(e)})
     return df, errors
@@ -300,6 +455,9 @@ def _background_parse_and_convert(dataset_id: str):
         # Save version snapshot
         _save_version_snapshot(dataset_id, df, detected_dates)
 
+        # Persist active dataset meta for restart recovery
+        _save_active_meta()
+
         ds["status"] = "ready"
         ds["progress"] = 100
         ds["rows"] = len(df)
@@ -311,6 +469,34 @@ def _background_parse_and_convert(dataset_id: str):
         ds["status"] = "error"
         ds["error"] = str(e)
         ds["progress"] = 0
+
+
+def _cleanup_old_datasets(exclude_id: str):
+    """Remove data folders for datasets other than exclude_id to prevent disk bloat."""
+    global _datasets
+    keys_to_remove = []
+    
+    for ds_id in _datasets:
+        if ds_id != exclude_id:
+            ds_dir = STORAGE_DIR / ds_id
+            if ds_dir.exists() and ds_dir.is_dir():
+                try:
+                    shutil.rmtree(ds_dir)
+                except Exception as e:
+                    print(f"Warning: Failed to cleanup dataset {ds_id}: {e}")
+            keys_to_remove.append(ds_id)
+            
+    for ds_id in keys_to_remove:
+        del _datasets[ds_id]
+
+    # Also clean orphaned folders on disk not in _datasets
+    if STORAGE_DIR.exists():
+        for child in STORAGE_DIR.iterdir():
+            if child.is_dir() and child.name != exclude_id and child.name not in _datasets:
+                try:
+                    shutil.rmtree(child)
+                except Exception:
+                    pass
 
 
 @app.post("/api/upload/init")
@@ -341,6 +527,8 @@ async def upload_init(req: UploadInitRequest):
 
     # Create/truncate raw file
     raw_path.write_bytes(b"")
+
+    _cleanup_old_datasets(exclude_id=dataset_id)
 
     return {"dataset_id": dataset_id, "chunk_size": CHUNK_SIZE}
 
@@ -487,6 +675,11 @@ async def upload_file(file: UploadFile = File(...)):
 
     # Save version snapshot
     _save_version_snapshot(dataset_id, _current_df, _date_columns)
+
+    _cleanup_old_datasets(exclude_id=dataset_id)
+
+    # Persist active dataset meta for restart recovery
+    _save_active_meta()
 
     # Check if file exists on disk for auto-reload
     disk_path = Path.cwd() / file.filename
@@ -876,7 +1069,7 @@ async def list_versions():
 @app.post("/api/versions/rollback")
 async def rollback_version(version: int = Query(...)):
     """Rollback to a specific version by re-loading its Parquet snapshot."""
-    global _current_df, _date_columns, _last_import_timestamp
+    global _current_df, _date_columns, _last_import_timestamp, _active_version
     if not _active_dataset_id:
         raise HTTPException(404, "No active dataset.")
     versions = _versions.get(_active_dataset_id, [])
@@ -895,24 +1088,44 @@ async def rollback_version(version: int = Query(...)):
     # Read back the versioned Parquet
     table = pq.read_table(str(parquet_path))
     df = table.to_pandas()
-    _current_df = df
-    _date_columns = []  # Re-detect dates from dtypes
+
+    # Preserve known date columns from the dataset registry or current state,
+    # then re-parse them (parquet may store dates as strings).
+    ds = _datasets.get(_active_dataset_id)
+    known_dates = list(_date_columns) if _date_columns else []
+    if not known_dates and ds:
+        known_dates = list(ds.get("date_columns", []))
+
+    restored_dates = []
     for col in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
-            _date_columns.append(col)
+            restored_dates.append(col)
+        elif col in known_dates:
+            # Re-parse string dates from parquet
+            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+            restored_dates.append(col)
+
+    _current_df = df
+    _date_columns = restored_dates
     _last_import_timestamp = datetime.now(timezone.utc).isoformat()
+    _active_version = version  # track which version is now current
 
     # Copy this version's parquet to become the current data.parquet
     ds_dir = STORAGE_DIR / _active_dataset_id
     shutil.copy2(str(parquet_path), str(ds_dir / "data.parquet"))
 
+    # Re-persist the in-memory df (with proper date handling)
+    _persist_current_df()
+
     # Update dataset registry
-    ds = _datasets.get(_active_dataset_id)
     if ds:
         ds["rows"] = len(df)
         ds["columns"] = list(df.columns)
         ds["numeric_columns"] = list(df.select_dtypes(include="number").columns)
         ds["date_columns"] = _date_columns
+
+    # Persist meta so the rollback survives server restart
+    _save_active_meta()
 
     return {
         "ok": True,
@@ -991,6 +1204,7 @@ async def get_data(
         "total_pages": max(1, (total + page_size - 1) // page_size),
         "columns": list(_current_df.columns),
         "rows": chunk.fillna("").to_dict(orient="records"),
+        "derived_columns": _derived_columns.get(_active_dataset_id, []) if _active_dataset_id else [],
     }
 
 
@@ -1017,8 +1231,33 @@ async def update_cell(update: CellUpdate):
         except Exception:
             pass
     _current_df.at[update.row, col] = val
+    _persist_current_df()
     return {"ok": True}
 
+
+class FormulaPreview(BaseModel):
+    formula: str
+
+@app.post("/api/data/formula_preview")
+async def preview_formula(body: FormulaPreview):
+    """Preview a formula on the first 5 rows without saving."""
+    if _current_df is None:
+        raise HTTPException(404, "No dataset loaded.")
+    try:
+        result = _current_df.head(5).eval(body.formula)
+        values = result.fillna("").tolist() if hasattr(result, 'fillna') else [result] * 5
+        # Convert numpy types to native Python
+        clean = []
+        for v in values:
+            if isinstance(v, (np.integer,)):
+                clean.append(int(v))
+            elif isinstance(v, (np.floating,)):
+                clean.append(float(v))
+            else:
+                clean.append(v)
+        return {"ok": True, "preview": clean}
+    except Exception as e:
+        raise HTTPException(400, f"Formula error: {e}")
 
 @app.post("/api/data/add_column")
 async def add_computed_column(col: NewColumn):
@@ -1034,6 +1273,10 @@ async def add_computed_column(col: NewColumn):
     except Exception as e:
         raise HTTPException(400, f"Formula error: {e}")
 
+    # Round numeric results to 4 decimal places for readability
+    if pd.api.types.is_numeric_dtype(_current_df[col.name]):
+        _current_df[col.name] = _current_df[col.name].round(4)
+
     # Register in pipeline for replay
     if _active_dataset_id:
         if _active_dataset_id not in _derived_columns:
@@ -1043,10 +1286,13 @@ async def add_computed_column(col: NewColumn):
         if col.name not in existing_names:
             _derived_columns[_active_dataset_id].append({"name": col.name, "formula": col.formula})
 
+    _persist_current_df()
+    _save_active_meta()
     return {
         "ok": True,
         "columns": list(_current_df.columns),
         "numeric_columns": list(_current_df.select_dtypes(include="number").columns),
+        "derived_columns": _derived_columns.get(_active_dataset_id, []) if _active_dataset_id else [],
     }
 
 
@@ -1066,10 +1312,13 @@ async def delete_column(column: str = Query(...)):
         _derived_columns[_active_dataset_id] = [
             d for d in _derived_columns[_active_dataset_id] if d["name"] != column
         ]
+    _persist_current_df()
+    _save_active_meta()
     return {
         "ok": True,
         "columns": list(_current_df.columns),
         "numeric_columns": list(_current_df.select_dtypes(include="number").columns),
+        "derived_columns": _derived_columns.get(_active_dataset_id, []) if _active_dataset_id else [],
     }
 
 
@@ -1133,6 +1382,7 @@ async def preview_rows(
         "limit": limit,
         "columns": list(_current_df.columns),
         "rows": chunk.fillna("").to_dict(orient="records"),
+        "derived_columns": _derived_columns.get(_active_dataset_id, []) if _active_dataset_id else [],
     }
 
 

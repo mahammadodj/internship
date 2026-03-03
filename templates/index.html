@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DCA Pro – Decline Curve Analysis</title>
   <script src="/static/echarts.min.js"></script>
+  <script src="/static/math.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <link rel="stylesheet" href="/static/styles.css?v=4" />
 </head>
@@ -186,13 +187,14 @@
       <div class="card-title">
         <span class="dot"></span> Data Editor
         <div style="margin-left:auto;display:flex;gap:8px;">
-          <button class="btn btn-outline btn-sm" onclick="showAddColumnModal()">+ Add Column</button>
+          <button class="btn btn-outline btn-sm" onclick="showFormulaBuilder()">ƒ Calculated Field</button>
           <button class="btn btn-outline btn-sm" onclick="showDeleteColumnModal()">− Delete Column</button>
           <button class="btn btn-outline btn-sm" onclick="exportCSV()">↓ Export CSV</button>
         </div>
       </div>
       <div id="editorTableWrap" class="table-wrap" style="max-height:600px;"></div>
       <div class="pagination" id="editorPagination"></div>
+      <div id="derivedColumnsPanel" class="dc-panel" style="display:none;"></div>
     </div>
   </div>
 
@@ -286,7 +288,7 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
       <span style="font-size:.72rem;color:var(--text-muted);white-space:nowrap;">Text Color:</span>
-      <input type="color" id="annotColor" value="#000000"
+      <input type="color" id="annotColor" value="#e2e8f0"
         style="flex:1;height:24px;padding:0;border:1px solid var(--border);background:transparent;cursor:pointer;">
     </div>
     <div style="display:flex;gap:6px;justify-content:flex-end;">
@@ -298,6 +300,9 @@
 
   <!-- Axis Label Edit Input -->
   <input type="text" id="axisLabelInput" class="axis-label-input" style="display:none;" placeholder="Enter axis label">
+
+  <!-- Inline Annotation Input -->
+  <input type="text" id="annotInlineInput" class="annot-inline-input" style="display:none;" placeholder="Type annotation, Enter to save…">
 
   <!-- Axis Hover Toolbar -->
   <div id="axisHoverToolbar" class="axis-toolbar">

@@ -90,6 +90,8 @@ let uploadedColumns = [];
 
 let numericColumns = [];
 
+let derivedColumnNames = [];
+
 let allWells = [];
 
 let hasDiskPath = false;
@@ -136,6 +138,8 @@ const cardTableFilter = {};  // { cardId: {well:string, section:string} }
 const cardHeaders = {};      // { cardId: string }
 let _ctxMenuCardId = null;
 let _ctxMenuCoord = null;
+let _ctxMenuClientX = 0;
+let _ctxMenuClientY = 0;
 
 
 
@@ -633,6 +637,8 @@ function applyUploadData(data) {
 
   populateSelectors();
 
+  renderDerivedColumnsPanel();
+
   // Clear all plot cards
 
   document.querySelectorAll('.plot-card').forEach(card => removeCard(card.id));
@@ -764,9 +770,15 @@ function buildVScrollHeader() {
 
     const typeHint = vsColTypes[c] || '';
 
-    html += `<th onclick="handlePreviewSort(event, '${c.replace(/'/g, "\\'")}')" title="${c}">
+    const isDerived = derivedColumnNames.includes(c);
 
-      ${c}${filterIcon}${sortIcon}
+    const derivedCls = isDerived ? ' th-derived' : '';
+
+    const derivedBadge = isDerived ? '<span class="derived-badge">ƒ</span>' : '';
+
+    html += `<th class="${derivedCls}" onclick="handlePreviewSort(event, '${c.replace(/'/g, "\\'")}')" title="${c}${isDerived ? ' (calculated)' : ''}">
+
+      ${derivedBadge}${c}${filterIcon}${sortIcon}
 
       <span class="col-type">${typeHint}</span>
 
@@ -874,7 +886,11 @@ function renderVisibleRows() {
 
     if (row) {
 
-      vsColumns.forEach(c => html += `<td>${row[c] ?? ''}</td>`);
+      vsColumns.forEach(c => {
+        const isDerived = derivedColumnNames.includes(c);
+        const cls = isDerived ? ' class="td-derived"' : '';
+        html += `<td${cls}>${row[c] ?? ''}</td>`;
+      });
 
     } else {
 
@@ -923,6 +939,8 @@ async function fetchPreviewBatch(offset) {
     vsCache[offset] = data.rows;
 
     vsTotalRows = data.total;
+
+    if (data.derived_columns) derivedColumnNames = data.derived_columns.map(d => d.name || d);
 
     // Update row count display
 
@@ -1386,6 +1404,8 @@ function deletePage(pageId) {
 
 function switchPage(pageId) {
 
+  if (pageId === activePageId) return;
+
   activePageId = pageId;
 
   // Show/hide plot cards
@@ -1395,7 +1415,10 @@ function switchPage(pageId) {
 
   });
 
-  renderPageTabs();
+  // Update active class inline – no full re-render so existing nameSpan elements stay alive
+  document.querySelectorAll('#pageTabs .page-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.pageId === pageId);
+  });
 
   setTimeout(() => {
 
@@ -1422,6 +1445,8 @@ function renderPageTabs() {
     const btn = document.createElement('button');
 
     btn.className = 'page-tab' + (pg.id === activePageId ? ' active' : '');
+
+    btn.dataset.pageId = pg.id;
 
     const nameSpan = document.createElement('span');
 
@@ -1491,7 +1516,7 @@ function renderPageTabs() {
 
     }
 
-    btn.onclick = () => switchPage(pg.id);
+    btn.onclick = (e) => { if (e.detail >= 2) return; switchPage(pg.id); };
 
     tabs.appendChild(btn);
 
@@ -1610,10 +1635,6 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
     <button class="plot-remove" onclick="removeCard('${cardId}')">×</button>
 
-    <div class="plot-card-header">
-      <input type="text" class="plot-card-header-input p-header" placeholder="Click to add section header…" value="${presetHeader || ''}">
-    </div>
-
     <div class="plot-header">
 
       <div class="control-group"><label>X Axis</label>
@@ -1699,8 +1720,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
           <span class="style-label">Actual Pts</span>
           <input type="color" class="s-actual-color" value="#3b82f6">
           <select class="s-actual-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
-          <input type="range" class="s-actual-size" min="2" max="20" value="6" title="Size">
-          <span class="s-actual-size-val style-range-val">6</span>
+          <input type="range" class="s-actual-size" min="2" max="20" value="10" title="Size">
+          <span class="s-actual-size-val style-range-val">10</span>
         </div>
         <div class="style-row">
           <span class="style-label">Fitted Curve</span>
@@ -1711,10 +1732,10 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
         </div>
         <div class="style-row">
           <span class="style-label">Fitted Markers</span>
-          <label class="style-check"><input type="checkbox" class="s-fitted-markers"> Show</label>
+          <label class="style-check"><input type="checkbox" class="s-fitted-markers" checked> Show</label>
           <select class="s-fitted-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle" selected>▲ Triangle</option></select>
-          <input type="range" class="s-fitted-msize" min="2" max="20" value="6" title="Size">
-          <span class="s-fitted-msize-val style-range-val">6</span>
+          <input type="range" class="s-fitted-msize" min="2" max="25" value="14" title="Size">
+          <span class="s-fitted-msize-val style-range-val">14</span>
         </div>
       </div>
       <div class="style-section">
@@ -1723,16 +1744,16 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
           <span class="style-label">Forecast</span>
           <input type="color" class="s-forecast-color" value="#22c55e">
           <select class="s-forecast-style"><option value="solid">Solid</option><option value="dashed" selected>Dashed</option><option value="dotted">Dotted</option></select>
-          <input type="range" class="s-forecast-width" min="1" max="6" value="2" title="Width">
-          <span class="s-forecast-width-val style-range-val">2</span>
+          <input type="range" class="s-forecast-width" min="1" max="6" value="3" title="Width">
+          <span class="s-forecast-width-val style-range-val">3</span>
         </div>
         <div class="style-row">
           <span class="style-label">Fcst Markers</span>
-          <label class="style-check"><input type="checkbox" class="s-forecast-markers"> Show</label>
+          <label class="style-check"><input type="checkbox" class="s-forecast-markers" checked> Show</label>
           <label class="style-check"><input type="checkbox" class="s-forecast-labels"> Labels</label>
-          <select class="s-forecast-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
-          <input type="range" class="s-forecast-msize" min="2" max="20" value="8" title="Size">
-          <span class="s-forecast-msize-val style-range-val">8</span>
+          <select class="s-forecast-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle" selected>▲ Triangle</option></select>
+          <input type="range" class="s-forecast-msize" min="2" max="20" value="14" title="Size">
+          <span class="s-forecast-msize-val style-range-val">14</span>
         </div>
       </div>
       <div class="style-section">
@@ -1741,14 +1762,14 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
           <span class="style-label">P10 Curve</span>
           <input type="color" class="s-p10-color" value="#22c55e">
           <label class="style-check"><input type="checkbox" class="s-p10-line" checked> Line</label>
-          <label class="style-check"><input type="checkbox" class="s-p10-marker"> Markers</label>
+          <label class="style-check"><input type="checkbox" class="s-p10-marker" checked> Markers</label>
           <label class="style-check"><input type="checkbox" class="s-p10-labels"> Labels</label>
         </div>
         <div class="style-row">
           <span class="style-label">P90 Curve</span>
           <input type="color" class="s-p90-color" value="#ef4444">
           <label class="style-check"><input type="checkbox" class="s-p90-line" checked> Line</label>
-          <label class="style-check"><input type="checkbox" class="s-p90-marker"> Markers</label>
+          <label class="style-check"><input type="checkbox" class="s-p90-marker" checked> Markers</label>
           <label class="style-check"><input type="checkbox" class="s-p90-labels"> Labels</label>
         </div>
       </div>
@@ -1761,7 +1782,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
         </div>
         <div class="style-row">
           <span class="style-label">Section Header</span>
-          <input type="color" class="s-header-color" value="#334155" title="Color">
+          <input type="color" class="s-header-color" value="#e2e8f0" title="Color">
           <input type="range" class="s-header-fsize" min="0.8" max="4.0" step="0.1" value="1.8" title="Size">
           <span class="s-header-fsize-val style-range-val">1.8</span>
           <label class="style-check"><input type="checkbox" class="s-header-bold"> Bold</label>
@@ -1830,7 +1851,32 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
   `;
 
-  container.appendChild(card);
+  // Create wrapper and external section header
+  const cardWrap = document.createElement('div');
+  cardWrap.className = 'card-wrap';
+
+  const headerDiv = document.createElement('div');
+  headerDiv.className = 'plot-card-header' + (presetHeader ? ' has-content' : '');
+
+  const headerInput = document.createElement('input');
+  headerInput.type = 'text';
+  headerInput.className = 'plot-card-header-input p-header';
+  headerInput.placeholder = 'Click to add section header…';
+  headerInput.value = presetHeader || '';
+  headerDiv.appendChild(headerInput);
+
+  // Store reference on card element so existing querySelector('.p-header') calls still work
+  card._headerInput = headerInput;
+
+  // Toggle has-content class as user types
+  headerInput.addEventListener('input', () => {
+    cardHeaders[cardId] = headerInput.value;
+    headerDiv.classList.toggle('has-content', headerInput.value.trim().length > 0);
+  });
+
+  cardWrap.appendChild(headerDiv);
+  cardWrap.appendChild(card);
+  container.appendChild(cardWrap);
 
   // ─── Populate per-card column selectors ───
   populateCardColumnSelectors(cardId, presetSelX, presetSelY, presetSelWellCol);
@@ -1902,7 +1948,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
     const st = readCardStyles(cardId);
     cardStyles[cardId] = st;
 
-    const headerEl = card.querySelector('.p-header');
+    const headerEl = card._headerInput || card.querySelector('.p-header');
     if (headerEl) {
       headerEl.style.fontSize = st.headerFontSize + 'rem';
       headerEl.style.color = st.headerColor;
@@ -1957,13 +2003,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
     });
   }
 
-  const headerInput = card.querySelector('.p-header');
-  if (headerInput) {
-    headerInput.addEventListener('input', () => {
-      cardHeaders[cardId] = headerInput.value;
-      // No need to re-render chart for header text change as it's outside the canvas
-    });
-  }
+  // headerInput wired above when creating the external header element
 
 
 
@@ -1974,8 +2014,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 
 function getDefaultStyles() {
-
-  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 6, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 6, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 2, forecastMarkers: false, forecastLabels: false, forecastSymbol: 'circle', forecastSymbolSize: 8, p10Color: '#22c55e', p10Line: true, p10Marker: false, p10Labels: false, p90Color: '#ef4444', p90Line: true, p90Marker: false, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: '#334155', headerFontWeight: 'normal', headerTextAlign: 'left' };
+  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 10, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Line: true, p10Marker: true, p10Labels: false, p90Color: '#ef4444', p90Line: true, p90Marker: true, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
 }
 
 const PLOT_THEME_PRESETS = {
@@ -2035,7 +2074,7 @@ function readCardStyles(cardId) {
 
     actualSymbol: card.querySelector('.s-actual-symbol')?.value || 'circle',
 
-    actualSize: parseInt(card.querySelector('.s-actual-size')?.value || '6'),
+    actualSize: parseInt(card.querySelector('.s-actual-size')?.value || '10'),
 
     fittedColor: card.querySelector('.s-fitted-color')?.value || '#f59e0b',
 
@@ -2047,21 +2086,21 @@ function readCardStyles(cardId) {
 
     fittedSymbol: card.querySelector('.s-fitted-symbol')?.value || 'triangle',
 
-    fittedSymbolSize: parseInt(card.querySelector('.s-fitted-msize')?.value || '6'),
+    fittedSymbolSize: parseInt(card.querySelector('.s-fitted-msize')?.value || '14'),
 
     forecastColor: card.querySelector('.s-forecast-color')?.value || '#22c55e',
 
     forecastStyle: card.querySelector('.s-forecast-style')?.value || 'dashed',
 
-    forecastWidth: parseInt(card.querySelector('.s-forecast-width')?.value || '2'),
+    forecastWidth: parseInt(card.querySelector('.s-forecast-width')?.value || '3'),
 
     forecastMarkers: card.querySelector('.s-forecast-markers')?.checked || false,
 
     forecastLabels: card.querySelector('.s-forecast-labels')?.checked || false,
 
-    forecastSymbol: card.querySelector('.s-forecast-symbol')?.value || 'circle',
+    forecastSymbol: card.querySelector('.s-forecast-symbol')?.value || 'triangle',
 
-    forecastSymbolSize: parseInt(card.querySelector('.s-forecast-msize')?.value || '8'),
+    forecastSymbolSize: parseInt(card.querySelector('.s-forecast-msize')?.value || '14'),
 
     p10Color: card.querySelector('.s-p10-color')?.value || '#22c55e',
 
@@ -2084,7 +2123,7 @@ function readCardStyles(cardId) {
     gridY: card.querySelector('.s-grid-y')?.checked !== false,
 
     headerFontSize: parseFloat(card.querySelector('.s-header-fsize')?.value || '1.8'),
-    headerColor: card.querySelector('.s-header-color')?.value || '#334155',
+    headerColor: card.querySelector('.s-header-color')?.value || (document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0'),
     headerFontWeight: card.querySelector('.s-header-bold')?.checked ? 'bold' : 'normal',
     headerTextAlign: card.querySelector('.s-header-align')?.value || 'left',
   };
@@ -2174,7 +2213,7 @@ function applyStylesToCard(cardId, styles) {
   const gy = card.querySelector('.s-grid-y'); if (gy) gy.checked = merged.gridY !== false;
 
   s('.s-header-fsize', merged.headerFontSize || 1.8);
-  s('.s-header-color', merged.headerColor || '#334155');
+  s('.s-header-color', merged.headerColor || (document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0'));
   const hb = card.querySelector('.s-header-bold'); if (hb) hb.checked = merged.headerFontWeight === 'bold';
   s('.s-header-align', merged.headerTextAlign || 'left');
 }
@@ -2205,7 +2244,10 @@ function removeCard(id) {
 
   const el = document.getElementById(id);
 
-  if (el) el.remove();
+  if (el) {
+    const wrap = el.closest('.card-wrap');
+    if (wrap) wrap.remove(); else el.remove();
+  }
 
 }
 
@@ -4061,7 +4103,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
           itemStyle: { color: wFitColor },
-          data: w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]])
+          data: w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]]).filter(p => p[1] != null)
         });
 
       }
@@ -4076,7 +4118,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
           while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--;
 
-          if (lfi >= 0) bridgeArr.push([parseDateStr(w.x[lfi]), w.y_fitted[lfi]]);
+          if (lfi >= 0) bridgeArr.push({ value: [parseDateStr(w.x[lfi]), w.y_fitted[lfi]], symbol: 'none' });
 
         }
 
@@ -4115,7 +4157,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
           itemStyle: { color: wFitColor },
-          data: w.x.map((xv, i) => [xv, w.y_fitted[i]])
+          data: w.x.map((xv, i) => [xv, w.y_fitted[i]]).filter(p => p[1] != null)
         });
       }
 
@@ -4123,7 +4165,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         const bridgeArr = [];
 
-        if (w.y_fitted && w.y_fitted.length > 0 && w.x.length > 0) { let lfi = w.y_fitted.length - 1; while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--; if (lfi >= 0) bridgeArr.push([w.x[lfi], w.y_fitted[lfi]]); }
+        if (w.y_fitted && w.y_fitted.length > 0 && w.x.length > 0) { let lfi = w.y_fitted.length - 1; while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--; if (lfi >= 0) bridgeArr.push({ value: [w.x[lfi], w.y_fitted[lfi]], symbol: 'none' }); }
 
         series.push({
           name: prefix + 'Forecast', type: 'line', showSymbol: st.forecastMarkers, symbol: st.forecastSymbol, symbolSize: st.forecastSymbolSize, smooth: false,
@@ -4198,7 +4240,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         lineStyle: { color: ul.color, type: 'solid', width: 2 },
 
-        label: { show: true, formatter: ul.name, color: ul.color, fontSize: 11 },
+        label: { show: true, formatter: ul.name, color: ul.color, fontSize: 11, position: ul.type === 'h' ? 'insideStartTop' : 'insideEndTop' },
 
         data: [mlDataItem]
 
@@ -4355,10 +4397,10 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   const axPos = cardAxisPositions[cardId] || { x: 'bottom', y: 'left' };
 
-  const gridLeft = axPos.y === 'right' ? 30 : 60;
-  const gridRight = axPos.y === 'right' ? 60 : 30;
+  const gridLeft = axPos.y === 'right' ? 30 : 80;
+  const gridRight = axPos.y === 'right' ? 80 : 30;
   const gridTop = axPos.x === 'top' ? 70 : 50;
-  const gridBottom = axPos.x === 'top' ? (isDate ? 40 : 30) : (isDate ? 70 : 40);
+  const gridBottom = axPos.x === 'top' ? (isDate ? 40 : 30) : (isDate ? 65 : 35);
   const dzBottom = axPos.x === 'top' ? (isDate ? 8 : 4) : (isDate ? 8 : 4);
 
   const option = {
@@ -4434,15 +4476,21 @@ function renderSingleChart(cardId, data, forecastMonths) {
       splitLine: { show: st.gridX !== false, lineStyle: { color: spC, type: 'dashed' } },
 
       axisLine: { lineStyle: { color: axC } },
-
-      axisLabel: { color: lbC },
-
+      axisLabel: {
+        color: lbC,
+        formatter: function(val) {
+          if (Math.abs(val) >= 1000000) {
+            return (val / 1000000).toFixed(1) + 'M';
+          } else if (Math.abs(val) >= 1000) {
+            return (val / 1000).toFixed(1) + 'k';
+          }
+          return val;
+        }
+      },
       min: useLogScale ? 0.01 : undefined
-
     },
 
-    dataZoom: [{ type: 'slider', xAxisIndex: 0, bottom: dzBottom, height: 18 }],
-
+    
     series: series
 
   };
@@ -4682,9 +4730,9 @@ function setupBoxSelection(cardId, chart, chartDiv) {
 
     const offsetY = e.clientY - rect.top;
 
-    const dp = chart.convertFromPixel('grid', [offsetX, offsetY]);
-
-    if (!dp) return;
+    // Only start box-selection when the click is strictly inside the grid area.
+    // containPixel returns false for axis regions, so axis-pan drags are not captured.
+    if (!chart.containPixel('grid', [offsetX, offsetY])) return;
 
     _activeSelection = { cardId, chart, chartDiv, startX: offsetX, startY: offsetY, overlay: null };
 
@@ -5184,6 +5232,7 @@ document.addEventListener('contextmenu', function (e) {
   });
 
   menu.style.left = e.clientX + 'px'; menu.style.top = e.clientY + 'px';
+  _ctxMenuClientX = e.clientX; _ctxMenuClientY = e.clientY;
 
   menu.style.display = 'block';
 
@@ -5401,37 +5450,23 @@ document.getElementById('lineColorDel').addEventListener('click', function () {
 
 /* --- Feature 2: Annotations --- */
 
-function addAnnotationPrompt(cardId, coord) {
+function addAnnotationPrompt(cardId, coord, mouseEvt) {
 
   const annCoord = coord || _ctxMenuCoord;
 
   if (!annCoord) return;
 
-  const text = prompt('Enter annotation text:');
+  const cx = mouseEvt ? mouseEvt.clientX : _ctxMenuClientX || window.innerWidth / 2;
+  const cy = mouseEvt ? mouseEvt.clientY : _ctxMenuClientY || window.innerHeight / 2;
 
-  if (!text) return;
-
-  if (!cardAnnotations[cardId]) cardAnnotations[cardId] = [];
-
-  cardAnnotations[cardId].push({
-
-    id: Date.now() + Math.floor(Math.random() * 1000),
-
-    x: annCoord.x,
-
-    y: annCoord.y,
-
-    xLabel: annCoord.xLabel,
-
-    xType: annCoord.xType,
-
-    text, fontSize: 12,
-
-    color: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0'
-
-  });
-
-  reRenderChart(cardId);
+  const input = document.getElementById('annotInlineInput');
+  input.value = '';
+  input.style.left = cx + 'px';
+  input.style.top = cy + 'px';
+  input.style.display = 'block';
+  input._cardId = cardId;
+  input._annCoord = annCoord;
+  input.focus();
 
 }
 
@@ -5515,6 +5550,45 @@ document.getElementById('annotDel').addEventListener('click', function () {
 
 });
 
+/* Inline annotation input handlers */
+(function () {
+  const inp = document.getElementById('annotInlineInput');
+  if (!inp) return;
+
+  function saveAnnotation() {
+    const text = inp.value.trim();
+    const cardId = inp._cardId;
+    const annCoord = inp._annCoord;
+    inp.style.display = 'none';
+    inp._cardId = null; inp._annCoord = null;
+    if (!text || !cardId || !annCoord) return;
+    if (!cardAnnotations[cardId]) cardAnnotations[cardId] = [];
+    cardAnnotations[cardId].push({
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      x: annCoord.x, y: annCoord.y,
+      xLabel: annCoord.xLabel, xType: annCoord.xType,
+      text, fontSize: 12,
+      color: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0'
+    });
+    reRenderChart(cardId);
+  }
+
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); saveAnnotation(); }
+    if (e.key === 'Escape') {
+      inp.style.display = 'none';
+      inp._cardId = null; inp._annCoord = null;
+    }
+  });
+
+  inp.addEventListener('blur', function () {
+    // Small delay so click-away doesn't prevent Enter from firing
+    setTimeout(() => {
+      if (inp.style.display !== 'none') saveAnnotation();
+    }, 150);
+  });
+})();
+
 /* Close popups on outside click */
 
 document.addEventListener('mousedown', function (e) {
@@ -5522,6 +5596,8 @@ document.addEventListener('mousedown', function (e) {
   if (!e.target.closest('#lineColorPopup')) document.getElementById('lineColorPopup').style.display = 'none';
 
   if (!e.target.closest('#annotationPopup') && !e.target.closest('.mini-chart, .modal-full-view-chart')) document.getElementById('annotationPopup').style.display = 'none';
+
+  if (e.target.id !== 'annotInlineInput') { const ai = document.getElementById('annotInlineInput'); if (ai && ai.style.display !== 'none') { ai.blur(); } }
 
 });
 
@@ -5608,7 +5684,7 @@ document.addEventListener('dblclick', function (e) {
     xType: xType,
     xLabel: xType === 'category' ? (opt.xAxis[0].data[catIdx] || catIdx) : (xType === 'time' ? formatDateTs(dataCoord[0]) : dataCoord[0])
   };
-  addAnnotationPrompt(cardId, annCoord);
+  addAnnotationPrompt(cardId, annCoord, e);
 
 });
 
@@ -5888,8 +5964,8 @@ function _axisMoveToOpposite(cardId, axis) {
       const cardId = _axisToolbar.cardId, chartKey = _axisToolbar.chartKey, axis = _axisToolbar.axis;
       if (!cardId || !axis) return;
       switch (action) {
-        case 'zoom-in': _axisZoom(cardId, axis, 0.5, chartKey); break;
-        case 'zoom-out': _axisZoom(cardId, axis, 2.0, chartKey); break;
+        case 'zoom-in': _axisZoom(cardId, axis, 0.8, chartKey); break;
+        case 'zoom-out': _axisZoom(cardId, axis, 1.25, chartKey); break;
         case 'fit': _axisFit(cardId, axis, chartKey); tb.classList.remove('show'); break;
         case 'range': _axisShowRange(cardId, axis, chartKey); break;
         case 'move': _axisMoveToOpposite(cardId, axis); tb.classList.remove('show'); break;
@@ -5975,9 +6051,13 @@ async function loadEditorPage(page) {
 
     uploadedColumns = data.columns;
 
+    if (data.derived_columns) derivedColumnNames = data.derived_columns.map(d => d.name || d);
+
     renderEditorTable(data);
 
     renderEditorPagination(data);
+
+    renderDerivedColumnsPanel();
 
   } catch (e) {
 
@@ -6001,9 +6081,12 @@ function renderEditorTable(data) {
 
     const filterIcon = (editorState.filterCol === c) ? '🔍' : '';
 
-    html += `<th class="th-sortable" onclick="handleHeaderStart(event, '${c}', 'editor')">
+    const isDerived = derivedColumnNames.includes(c);
+    const derivedCls = isDerived ? ' th-derived' : '';
+    const derivedBadge = isDerived ? '<span class="derived-badge">ƒ</span>' : '';
+    html += `<th class="th-sortable${derivedCls}" onclick="handleHeaderStart(event, '${c}', 'editor')" title="${c}${isDerived ? ' (calculated)' : ''}">
 
-      ${c} ${filterIcon} ${sortIcon}
+      ${derivedBadge}${c} ${filterIcon} ${sortIcon}
 
       <span class="th-menu" onclick="event.stopPropagation(); showHeaderMenu(event, '${c}', 'editor')">⋮</span>
 
@@ -6021,7 +6104,9 @@ function renderEditorTable(data) {
 
     data.columns.forEach(c => {
 
-      html += `<td contenteditable="true" data-row="${absRow}" data-col="${c}" onblur="handleCellEdit(this)">${r[c] ?? ''}</td>`;
+      const isDerived = derivedColumnNames.includes(c);
+      const cls = isDerived ? ' class="td-derived"' : '';
+      html += `<td${cls} contenteditable="true" data-row="${absRow}" data-col="${c}" onblur="handleCellEdit(this)">${r[c] ?? ''}</td>`;
 
     });
 
@@ -6085,78 +6170,549 @@ async function handleCellEdit(td) {
 
 
 
-function showAddColumnModal() {
+/* ====================================================================
+   Formula Composer – Calculated Fields (v2)
+   ==================================================================== */
+
+let _fcParts = [];            // [{type:'col'|'fn'|'op'|'num'|'text', value:string}]
+let _fcPreviewTimer = null;
+let _fcAutoComplete = [];     // dropdown suggestions
+let _fcAcIndex = -1;          // highlighted autocomplete index
+let _fcFnSearch = '';
+
+// ── Function catalogue organised by category ──
+const FC_FUNCTIONS = {
+  Math:        ['ABS','ROUND','SQRT','LOG','LOG10','POW','MOD','CEIL','FLOOR','EXP'],
+  Statistical: ['SUM','AVG','MIN','MAX','STD','VAR','MEDIAN','COUNT'],
+  Logical:     ['IF','AND','OR','NOT','ISNULL','FILLNA'],
+};
+const FC_ALL_FNS = Object.values(FC_FUNCTIONS).flat();
+const FC_FN_DESCRIPTIONS = {
+  ABS:'Absolute value', ROUND:'Round to N digits', SQRT:'Square root',
+  LOG:'Natural logarithm', LOG10:'Base-10 log', POW:'Raise to power',
+  MOD:'Modulo / remainder', CEIL:'Round up', FLOOR:'Round down', EXP:'e^x',
+  SUM:'Sum of column', AVG:'Average / mean', MIN:'Minimum value',
+  MAX:'Maximum value', STD:'Standard deviation', VAR:'Variance',
+  MEDIAN:'Median value', COUNT:'Count non-null',
+  IF:'Conditional: IF(cond, then, else)', AND:'Logical AND',
+  OR:'Logical OR', NOT:'Logical NOT', ISNULL:'Check for null',
+  FILLNA:'Replace null with value',
+};
+
+/* ── Open the Composer ── */
+function showFormulaBuilder(editFormula, editName) {
+  _fcParts = [];
+  _fcAutoComplete = [];
+  _fcAcIndex = -1;
+  _fcFnSearch = '';
 
   const mc = document.getElementById('modalContainer');
 
+  // Column chips for sidebar
+  const colChips = (uploadedColumns || []).map(c => {
+    const isNum = (numericColumns || []).includes(c);
+    return `<div class="fc-col-chip${isNum ? ' fc-num' : ''}" data-col="${c}"
+              onclick="fcInsertColumn('${c.replace(/'/g, "\\'")}')">
+              <span class="fc-col-dot ${isNum ? 'num' : 'txt'}"></span>
+              <span class="fc-col-name">${c}</span>
+              <span class="fc-col-badge">${isNum ? 'Num' : 'Txt'}</span>
+            </div>`;
+  }).join('');
+
+  // Function list grouped
+  let fnGroupsHtml = '';
+  for (const [cat, fns] of Object.entries(FC_FUNCTIONS)) {
+    const items = fns.map(f =>
+      `<div class="fc-fn-row" data-fn="${f}" onclick="fcInsertFunction('${f}')">
+         <span class="fc-fn-name">${f}</span>
+         <span class="fc-fn-desc">${FC_FN_DESCRIPTIONS[f] || ''}</span>
+       </div>`
+    ).join('');
+    fnGroupsHtml += `<div class="fc-fn-group">
+      <div class="fc-fn-cat">${cat}</div>${items}</div>`;
+  }
+
   mc.innerHTML = `
+    <div class="modal-overlay fc-overlay" onclick="if(event.target===this)this.remove()">
+      <div class="modal fc-modal">
 
-    <div class="modal-overlay" onclick="if(event.target===this)this.remove()">
-
-      <div class="modal">
-
-        <h3>Add Computed Column</h3>
-
-        <div class="form-group"><label>Column Name</label><input type="text" id="newColName" placeholder="e.g. total_rate"></div>
-
-        <div class="form-group"><label>Formula (use existing column names)</label><input type="text" id="newColFormula" placeholder="e.g. orate + wrate"></div>
-
-        <p style="font-size:.72rem;color:var(--text-dim);margin-top:4px;">Supports: +, -, *, /, **, column names. Example: <code>orate / (orate + wrate) * 100</code></p>
-
-        <div class="modal-actions">
-
-          <button class="btn btn-outline btn-sm" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-
-          <button class="btn btn-sm" onclick="doAddColumn()">Add Column</button>
-
+        <!-- Title bar -->
+        <div class="fc-titlebar">
+          <div class="fc-titlebar-left">
+            <span class="fc-icon">ƒ</span>
+            <h3>Formula Composer</h3>
+          </div>
+          <button class="fc-close" onclick="this.closest('.modal-overlay').remove()" title="Close">
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
         </div>
 
-      </div>
+        <!-- Two-column body -->
+        <div class="fc-workspace">
 
+          <!-- LEFT panel ─ columns & functions -->
+          <div class="fc-panel">
+            <div class="fc-panel-tabs">
+              <button class="fc-ptab active" data-tab="cols" onclick="fcSwitchTab('cols')">Columns</button>
+              <button class="fc-ptab" data-tab="fns"  onclick="fcSwitchTab('fns')">Functions</button>
+            </div>
+
+            <!-- Columns tab -->
+            <div class="fc-tab-body" id="fcTabCols">
+              <input type="text" class="fc-panel-search" id="fcColSearch"
+                     placeholder="Search columns…" oninput="fcFilterCols(this.value)" autocomplete="off">
+              <div class="fc-col-list" id="fcColList">${colChips}</div>
+            </div>
+
+            <!-- Functions tab -->
+            <div class="fc-tab-body" id="fcTabFns" style="display:none">
+              <input type="text" class="fc-panel-search" id="fcFnSearch"
+                     placeholder="Search functions…" oninput="fcFilterFns(this.value)" autocomplete="off">
+              <div class="fc-fn-list" id="fcFnList">${fnGroupsHtml}</div>
+            </div>
+
+            <!-- Operators strip -->
+            <div class="fc-ops-strip">
+              <button onclick="fcInsertOp('+')">+</button>
+              <button onclick="fcInsertOp('−')">−</button>
+              <button onclick="fcInsertOp('*')">×</button>
+              <button onclick="fcInsertOp('/')">÷</button>
+              <button onclick="fcInsertOp('**')">^</button>
+              <button onclick="fcInsertOp('(')">(</button>
+              <button onclick="fcInsertOp(')')">)</button>
+            </div>
+          </div>
+
+          <!-- RIGHT panel ─ editor + preview -->
+          <div class="fc-editor-panel">
+
+            <!-- Column name -->
+            <div class="fc-field">
+              <label>Column Name</label>
+              <input type="text" id="fcColName" value="${editName || ''}"
+                     placeholder="e.g. total_production" autocomplete="off" spellcheck="false">
+            </div>
+
+            <!-- Tokenised formula editor -->
+            <div class="fc-field" style="flex:1;display:flex;flex-direction:column;min-height:0">
+              <label>Formula <span class="fc-hint">Type or click to build</span></label>
+              <div class="fc-token-editor" id="fcTokenEditor" onclick="document.getElementById('fcInput').focus()">
+                <div class="fc-tokens" id="fcTokens"></div>
+                <input type="text" id="fcInput" class="fc-input" autocomplete="off" spellcheck="false"
+                       placeholder="Start typing…"
+                       oninput="fcOnInput(this)" onkeydown="fcOnKeydown(event)">
+                <div class="fc-autocomplete" id="fcAutocomplete"></div>
+              </div>
+              <div class="fc-formula-raw" id="fcFormulaRaw"></div>
+            </div>
+
+            <!-- Live sample result -->
+            <div class="fc-live-result">
+              <div class="fc-live-header">
+                <span class="fc-live-dot"></span>
+                <span>Live Sample Result</span>
+                <span class="fc-live-badge" id="fcLiveStatus">Waiting</span>
+              </div>
+              <div class="fc-live-body" id="fcLiveBody">
+                <span class="fc-live-empty">Compose a formula to see live results</span>
+              </div>
+              <div class="fc-error" id="fcError"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="fc-footer">
+          <button class="btn btn-outline btn-sm" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn btn-sm fc-save-btn" id="fcSaveBtn" onclick="fcSave()">Create Column</button>
+        </div>
+      </div>
     </div>`;
 
+  if (editFormula) fcParseExisting(editFormula);
+  setTimeout(() => document.getElementById('fcColName')?.focus(), 80);
 }
 
+/* ── Panel tab switching ── */
+function fcSwitchTab(tab) {
+  document.querySelectorAll('.fc-ptab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('fcTabCols').style.display = tab === 'cols' ? '' : 'none';
+  document.getElementById('fcTabFns').style.display  = tab === 'fns'  ? '' : 'none';
+}
 
+/* ── Column / function search ── */
+function fcFilterCols(q) {
+  const lc = q.toLowerCase();
+  document.querySelectorAll('#fcColList .fc-col-chip').forEach(el => {
+    el.style.display = el.dataset.col.toLowerCase().includes(lc) ? '' : 'none';
+  });
+}
+function fcFilterFns(q) {
+  const lc = q.toLowerCase();
+  document.querySelectorAll('#fcFnList .fc-fn-row').forEach(el => {
+    el.style.display = el.dataset.fn.toLowerCase().includes(lc) ? '' : 'none';
+  });
+  // hide empty group headers
+  document.querySelectorAll('#fcFnList .fc-fn-group').forEach(g => {
+    const visible = g.querySelectorAll('.fc-fn-row:not([style*="display: none"])').length;
+    g.style.display = visible ? '' : 'none';
+  });
+}
 
-async function doAddColumn() {
+/* ── Token insertion ── */
+function fcInsertColumn(col) {
+  _fcParts.push({ type: 'col', value: col });
+  _fcClearInput();
+  fcRender();
+}
 
-  const name = document.getElementById('newColName').value.trim();
+function fcInsertFunction(fn) {
+  _fcParts.push({ type: 'fn', value: fn });
+  _fcParts.push({ type: 'op', value: '(' });
+  _fcClearInput();
+  fcRender();
+  // Focus input so cursor is inside parens
+  setTimeout(() => document.getElementById('fcInput')?.focus(), 30);
+}
 
-  const formula = document.getElementById('newColFormula').value.trim();
+function fcInsertOp(op) {
+  // Normalise display chars to real operators for the hidden input
+  const map = { '−': '-', '×': '*', '÷': '/' };
+  _fcParts.push({ type: 'op', value: map[op] || op });
+  _fcClearInput();
+  fcRender();
+}
 
-  if (!name || !formula) { alert('Please fill in both fields.'); return; }
+function _fcClearInput() {
+  const inp = document.getElementById('fcInput');
+  if (inp) inp.value = '';
+  _fcAutoComplete = [];
+  _fcAcIndex = -1;
+  fcHideAc();
+}
+
+function fcRemoveToken(idx) {
+  _fcParts.splice(idx, 1);
+  fcRender();
+}
+
+/* ── Autocomplete while typing ── */
+function fcOnInput(inp) {
+  const raw = inp.value;
+  if (!raw) { fcHideAc(); return; }
+  const q = raw.toLowerCase();
+
+  // Build suggestions: columns + functions
+  let suggestions = [];
+  uploadedColumns.forEach(c => {
+    if (c.toLowerCase().includes(q)) suggestions.push({ type: 'col', value: c, label: c });
+  });
+  FC_ALL_FNS.forEach(f => {
+    if (f.toLowerCase().includes(q)) suggestions.push({ type: 'fn', value: f, label: f + '()' });
+  });
+  if (suggestions.length === 0) { fcHideAc(); return; }
+  suggestions = suggestions.slice(0, 8);
+
+  _fcAutoComplete = suggestions;
+  _fcAcIndex = 0;
+  fcShowAc();
+}
+
+function fcShowAc() {
+  const el = document.getElementById('fcAutocomplete');
+  if (!el || _fcAutoComplete.length === 0) { fcHideAc(); return; }
+  el.innerHTML = _fcAutoComplete.map((s, i) => {
+    const active = i === _fcAcIndex ? ' fc-ac-active' : '';
+    const icon = s.type === 'col' ? '<span class="fc-ac-icon col">⊞</span>'
+                                  : '<span class="fc-ac-icon fn">ƒ</span>';
+    return `<div class="fc-ac-item${active}" data-i="${i}"
+              onmousedown="fcPickAc(${i})">${icon}<span>${s.label}</span></div>`;
+  }).join('');
+  el.style.display = 'block';
+}
+
+function fcHideAc() {
+  const el = document.getElementById('fcAutocomplete');
+  if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+  _fcAutoComplete = [];
+  _fcAcIndex = -1;
+}
+
+function fcPickAc(i) {
+  const s = _fcAutoComplete[i];
+  if (!s) return;
+  if (s.type === 'col') fcInsertColumn(s.value);
+  else fcInsertFunction(s.value);
+  fcHideAc();
+}
+
+/* ── Keyboard handling ── */
+function fcOnKeydown(e) {
+  const inp = e.target;
+
+  // Autocomplete navigation
+  if (_fcAutoComplete.length > 0) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); _fcAcIndex = Math.min(_fcAcIndex + 1, _fcAutoComplete.length - 1); fcShowAc(); return; }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); _fcAcIndex = Math.max(_fcAcIndex - 1, 0); fcShowAc(); return; }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); fcPickAc(_fcAcIndex); return; }
+    if (e.key === 'Escape') { fcHideAc(); return; }
+  }
+
+  // Backspace on empty → remove last token
+  if (e.key === 'Backspace' && inp.value === '') {
+    e.preventDefault();
+    if (_fcParts.length) { _fcParts.pop(); fcRender(); }
+    return;
+  }
+
+  // Space  → commit literal number / operator
+  if (e.key === ' ' || (e.key === 'Enter' && _fcAutoComplete.length === 0)) {
+    const val = inp.value.trim();
+    if (val) {
+      if (!isNaN(val) && val !== '') {
+        _fcParts.push({ type: 'num', value: val });
+      } else if (['+','-','*','/','**','(',')'].includes(val)) {
+        _fcParts.push({ type: 'op', value: val });
+      } else {
+        const match = uploadedColumns.find(c => c.toLowerCase() === val.toLowerCase());
+        if (match) _fcParts.push({ type: 'col', value: match });
+        else _fcParts.push({ type: 'text', value: val });
+      }
+      inp.value = '';
+      fcHideAc();
+      fcRender();
+    }
+    if (e.key === 'Enter') e.preventDefault();
+  }
+}
+
+/* ── Render tokens + raw formula + trigger live preview ── */
+function fcRender() {
+  const tokensEl = document.getElementById('fcTokens');
+  const rawEl    = document.getElementById('fcFormulaRaw');
+  if (!tokensEl) return;
+
+  const displayMap = { '+':'+', '-':'−', '*':'×', '/':'÷', '**':'^' };
+
+  let html = '';
+  _fcParts.forEach((p, i) => {
+    let cls = 'fc-pill fc-pill-' + p.type;
+    let label = p.value;
+    if (p.type === 'col') label = p.value;          // just name, no brackets
+    if (p.type === 'op') label = displayMap[p.value] || p.value;
+    html += `<span class="${cls}" onclick="fcRemoveToken(${i})" title="Click to remove">
+               ${label}<i class="fc-x">×</i>
+             </span>`;
+  });
+  tokensEl.innerHTML = html;
+
+  const formula = fcBuildFormulaBackend();
+  if (rawEl) rawEl.innerHTML = formula
+    ? `<code>${fcBuildFormulaDisplay()}</code>`
+    : '<span class="fc-raw-empty">Your formula will appear here</span>';
+
+  // Live preview (debounced – instant feel)
+  fcSchedulePreview();
+}
+
+/* ── Build formula strings ── */
+function fcBuildFormulaDisplay() {
+  return _fcParts.map(p => {
+    if (p.type === 'col') return `[${p.value}]`;
+    if (p.type === 'fn')  return p.value;
+    return p.value;
+  }).join(' ');
+}
+
+function fcBuildFormulaBackend() {
+  let parts = [];
+  let i = 0;
+  while (i < _fcParts.length) {
+    const p = _fcParts[i];
+    if (p.type === 'fn' && ['SUM','AVG','MIN','MAX','STD','VAR','MEDIAN','COUNT'].includes(p.value)) {
+      const fn = p.value;
+      let j = i + 1;
+      while (j < _fcParts.length && _fcParts[j].value !== '(') j++;
+      j++; // skip '('
+      let depth = 1, inner = [];
+      while (j < _fcParts.length && depth > 0) {
+        if (_fcParts[j].value === '(') depth++;
+        else if (_fcParts[j].value === ')') { depth--; if (depth === 0) break; }
+        inner.push(_fcParts[j]);
+        j++;
+      }
+      const colExpr = inner.map(ip => ip.type === 'col' ? '`' + ip.value + '`' : ip.value).join(' ');
+      const aggMap = { SUM:'sum', AVG:'mean', MIN:'min', MAX:'max', STD:'std', VAR:'var', MEDIAN:'median', COUNT:'count' };
+      parts.push(`${colExpr}.${aggMap[fn]}()`);
+      i = j + 1;
+      continue;
+    }
+    if (p.type === 'col') parts.push('`' + p.value + '`');
+    else if (p.type === 'fn') {
+      const m = { ABS:'abs', ROUND:'round', SQRT:'sqrt', LOG:'log', LOG10:'log10', POW:'pow',
+                  MOD:'mod', CEIL:'ceil', FLOOR:'floor', EXP:'exp',
+                  IF:'where', AND:'and', OR:'or', NOT:'not', ISNULL:'isnull', FILLNA:'fillna' };
+      parts.push((m[p.value] || p.value.toLowerCase()));
+    }
+    else parts.push(p.value);
+    i++;
+  }
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/* ── Live preview (auto-fires 350ms after last edit) ── */
+function fcSchedulePreview() {
+  clearTimeout(_fcPreviewTimer);
+  _fcPreviewTimer = setTimeout(fcRunPreview, 350);
+}
+
+async function fcRunPreview() {
+  const body   = document.getElementById('fcLiveBody');
+  const badge  = document.getElementById('fcLiveStatus');
+  const errDiv = document.getElementById('fcError');
+  if (!body) return;
+
+  const formula = fcBuildFormulaBackend();
+  if (!formula) {
+    body.innerHTML = '<span class="fc-live-empty">Compose a formula to see live results</span>';
+    badge.textContent = 'Waiting';
+    badge.className = 'fc-live-badge';
+    errDiv.textContent = ''; errDiv.style.display = 'none';
+    return;
+  }
+
+  badge.textContent = 'Computing…';
+  badge.className = 'fc-live-badge computing';
+  errDiv.textContent = ''; errDiv.style.display = 'none';
 
   try {
-
-    const res = await fetch('/api/data/add_column', {
-
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-
-      body: JSON.stringify({ name, formula })
-
+    const res = await fetch('/api/data/formula_preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ formula })
     });
-
     const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Formula error');
 
+    const vals = data.preview || [];
+    let html = '<table class="fc-result-table"><thead><tr><th>Row</th><th>Result</th></tr></thead><tbody>';
+    vals.forEach((v, i) => {
+      const fmt = (typeof v === 'number') ? v.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(v);
+      html += `<tr><td>${i + 1}</td><td class="fc-result-val">${fmt}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+
+    badge.textContent = 'Valid ✓';
+    badge.className = 'fc-live-badge valid';
+  } catch (e) {
+    body.innerHTML = '<span class="fc-live-empty">—</span>';
+    badge.textContent = 'Error';
+    badge.className = 'fc-live-badge err';
+    errDiv.textContent = e.message;
+    errDiv.style.display = 'block';
+  }
+}
+
+/* ── Save column ── */
+async function fcSave() {
+  const name    = document.getElementById('fcColName')?.value.trim();
+  const formula = fcBuildFormulaBackend();
+  const errDiv  = document.getElementById('fcError');
+
+  if (!name) { _fcShowErr(errDiv, 'Please enter a column name.'); document.getElementById('fcColName')?.focus(); return; }
+  if (!formula) { _fcShowErr(errDiv, 'Build a formula first.'); return; }
+
+  const btn = document.getElementById('fcSaveBtn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+
+  try {
+    const res = await fetch('/api/data/add_column', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, formula })
+    });
+    const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Error');
 
     uploadedColumns = data.columns;
-
-    numericColumns = data.numeric_columns;
-
+    numericColumns  = data.numeric_columns;
+    derivedColumnNames = (data.derived_columns || []).map(d => d.name || d);
     populateSelectors();
-
+    previewState.columns = data.columns;
+    renderPreview();
     loadEditorPage(editorPage);
+    renderDerivedColumnsPanel();
 
     document.querySelector('.modal-overlay')?.remove();
-
-    showNotification(`Column "${name}" added`);
-
-  } catch (e) { alert(e.message); }
-
+    showNotification(`Calculated field "${name}" created`);
+  } catch (e) {
+    _fcShowErr(errDiv, e.message);
+    btn.disabled = false; btn.textContent = 'Create Column';
+  }
 }
 
+function _fcShowErr(el, msg) {
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+/* ── Re-parse existing formula ── */
+function fcParseExisting(formula) {
+  const tokens = formula.match(/`[^`]+`|[a-zA-Z_]\w*\(\)|[+\-*/()^]|\d+\.?\d*/g) || [];
+  tokens.forEach(t => {
+    if (t.startsWith('`') && t.endsWith('`')) _fcParts.push({ type: 'col', value: t.slice(1, -1) });
+    else if (t.endsWith('()')) {
+      const m = { 'sum()':'SUM','mean()':'AVG','min()':'MIN','max()':'MAX','abs()':'ABS','sqrt()':'SQRT',
+                  'std()':'STD','var()':'VAR','median()':'MEDIAN','count()':'COUNT' };
+      _fcParts.push({ type: 'fn', value: m[t.toLowerCase()] || t.slice(0,-2).toUpperCase() });
+    } else if (['+','-','*','/','**','(',')'].includes(t)) _fcParts.push({ type: 'op', value: t });
+    else if (!isNaN(t)) _fcParts.push({ type: 'num', value: t });
+    else _fcParts.push({ type: 'text', value: t });
+  });
+  fcRender();
+}
+
+// Backward-compat aliases
+function showAddColumnModal() { showFormulaBuilder(); }
+async function doAddColumn()  { fcSave(); }
+
+
+/* ── Calculated Columns Panel ── */
+function renderDerivedColumnsPanel() {
+  const panel = document.getElementById('derivedColumnsPanel');
+  if (!panel) return;
+
+  if (!derivedColumnNames.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+
+  // Fetch full info (with formulas)
+  fetch('/api/derived_columns')
+    .then(r => r.json())
+    .then(data => {
+      const cols = data.columns || [];
+      if (!cols.length) { panel.style.display = 'none'; return; }
+
+      let html = '<div class="dc-panel-header"><span class="dc-panel-icon">ƒ</span> Calculated Columns <span class="dc-panel-count">' + cols.length + '</span></div>';
+      html += '<div class="dc-panel-list">';
+      cols.forEach(d => {
+        html += `<div class="dc-panel-item">
+          <div class="dc-panel-item-info">
+            <span class="dc-panel-item-name">${d.name}</span>
+            <span class="dc-panel-item-formula">${d.formula}</span>
+          </div>
+          <button class="dc-panel-item-del" title="Delete column" onclick="doDeleteColumnByName('${d.name.replace(/'/g, "\\'")}')">×</button>
+        </div>`;
+      });
+      html += '</div>';
+      panel.innerHTML = html;
+    })
+    .catch(() => { panel.style.display = 'none'; });
+}
 
 
 function showDeleteColumnModal() {
@@ -7443,10 +7999,29 @@ function showHeaderMenu(e, col, scope) {
   activeHeader = { col, scope };
   const menu = document.getElementById('headerMenu');
 
-  // Position the menu
-  menu.style.left = e.clientX + 'px';
-  menu.style.top = e.clientY + 'px';
+  // Temporarily show off-screen to measure
+  menu.style.left = '-9999px';
+  menu.style.top = '-9999px';
   menu.classList.add('show');
+
+  const mw = menu.offsetWidth;
+  const mh = menu.offsetHeight;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  let x = e.clientX;
+  let y = e.clientY;
+
+  // Prevent overflow on right
+  if (x + mw > vw - 8) x = vw - mw - 8;
+  // Prevent overflow on bottom
+  if (y + mh > vh - 8) y = vh - mh - 8;
+  // Prevent negative
+  if (x < 4) x = 4;
+  if (y < 4) y = 4;
+
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
 
   // Set filter value if exists
   const input = document.getElementById('hmFilterInput');
@@ -7483,9 +8058,7 @@ document.querySelectorAll('.header-menu-item').forEach(item => {
     } else if (action === 'copy') {
       copyColumnValues(col, scope);
     } else if (action === 'remove') {
-      // For remove, we delete the column from the DF entirely via API
       if (confirm(`Remove column "${col}" from the dataset? This action cannot be undone.`)) {
-        document.getElementById('delColName').value = col; // Hack reuse existing logic? No, create dedicated function.
         doDeleteColumnByName(col);
       }
     }
@@ -7571,18 +8144,24 @@ async function doDeleteColumnByName(col) {
     if (!res.ok) throw new Error(data.detail || 'Error');
     uploadedColumns = data.columns;
     numericColumns = data.numeric_columns;
+    derivedColumnNames = (data.derived_columns || []).map(d => d.name || d);
     populateSelectors();
 
-    // Update both views
-    if (previewState.columns.includes(col)) {
-      previewState.columns = previewState.columns.filter(c => c !== col);
-      vsColumns = previewState.columns;
-      vsCache = {};
-      vsFetching.clear();
-      renderPreview();
+    // Sync preview state columns
+    previewState.columns = data.columns;
+
+    // Reset sort/filter if the deleted column was being used
+    if (previewState.sortCol === col) previewState.sortCol = null;
+    if (previewState.filterCol === col) {
+      previewState.filterCol = null;
+      previewState.filterVal = '';
     }
 
+    // Refresh the preview view completely
+    renderPreview();
+
     loadEditorPage(editorPage);
+    renderDerivedColumnsPanel();
     showNotification(`Column "${col}" deleted`);
   } catch (e) { alert(e.message); }
 }
@@ -7943,7 +8522,7 @@ function setupUserLineDrag(cardId, myChart) {
           return Object.assign({}, s, {
             name: line.name,
             markLine: Object.assign({}, s.markLine, {
-              label: Object.assign({}, (s.markLine || {}).label, { formatter: line.name, color: line.color }),
+              label: Object.assign({}, (s.markLine || {}).label, { formatter: line.name, color: line.color, position: line.type === 'h' ? 'insideStartTop' : 'insideEndTop' }),
               data: [mlDataItem]
             })
           });
@@ -7958,7 +8537,7 @@ function setupUserLineDrag(cardId, myChart) {
       return Object.assign({}, s, {
         name: line.name,
         markLine: Object.assign({}, s.markLine, {
-          label: Object.assign({}, (s.markLine || {}).label, { formatter: line.name, color: line.color }),
+          label: Object.assign({}, (s.markLine || {}).label, { formatter: line.name, color: line.color, position: line.type === 'h' ? 'insideStartTop' : 'insideEndTop' }),
           data: [mlDataItem]
         })
       });
@@ -8160,7 +8739,7 @@ function _collectWorkspaceState() {
       model: card.querySelector('.p-model')?.value || 'exponential',
       forecast: card.querySelector('.p-forecast')?.value || '0',
       title: card.querySelector('.p-title')?.value || '',
-      header: card.querySelector('.p-header')?.value || '',
+      header: (card._headerInput || card.querySelector('.p-header'))?.value || '',
       combine: card.querySelector('.p-combine')?.checked || false,
       combineAgg: card.querySelector('.p-combine-agg')?.value || 'sum',
       styles: cardStyles[cid] || null,
@@ -8176,6 +8755,7 @@ function _collectWorkspaceState() {
       headers: cardHeaders[cid] || '',
       zoomState: cardZoomState[cid] || null,
       pCurveState: cardPCurveState[cid] || null,
+      hasPlot: (card.querySelector('.chart-area')?.style.display !== 'none'),
     });
   });
 
@@ -8323,12 +8903,9 @@ async function _restoreImportTab() {
 async function loadWorkspace() {
   try {
     const { state, cardData } = await _loadCardDataFromIDB();
-    if (!state || !state.cards || state.cards.length === 0) {
-      console.log('No saved workspace found.');
-      return false;
-    }
+    const hasCards = state && state.cards && state.cards.length > 0;
 
-    // Check if the server still has data loaded
+    // Check if the server still has data loaded (always, even without saved cards)
     let serverHasData = false;
     try {
       const res = await fetch('/api/columns');
@@ -8343,7 +8920,7 @@ async function loadWorkspace() {
     if (serverHasData) {
       // Restore Import Data tab from server
       await _restoreImportTab();
-    } else {
+    } else if (hasCards) {
       if (state.uploadedColumns?.length > 0) {
         uploadedColumns = state.uploadedColumns;
         numericColumns = state.numericColumns || [];
@@ -8353,6 +8930,11 @@ async function loadWorkspace() {
         if (typeof showToast === 'function') showToast(msg, 'warning', 6000);
         else alert(msg);
       }
+    }
+
+    if (!hasCards) {
+      console.log('No saved cards found.');
+      return serverHasData;  // still return true if we restored the data tab
     }
 
     // Restore theme
@@ -8385,8 +8967,9 @@ async function loadWorkspace() {
     // Remove existing cards
     document.querySelectorAll('.plot-card').forEach(card => {
       if (chartInstances[card.id]) { chartInstances[card.id].dispose(); delete chartInstances[card.id]; }
-      card.remove();
     });
+    document.querySelectorAll('.card-wrap').forEach(w => w.remove());
+    document.querySelectorAll('.plot-card').forEach(card => card.remove());
 
     // Restore cards with per-card column selections
     for (const c of state.cards) {
@@ -8398,6 +8981,11 @@ async function loadWorkspace() {
       const cardSelX = c.selX || (state.pages?.find(p => p.id === cardPageId)?.selX) || state.selX || '';
       const cardSelY = c.selY || (state.pages?.find(p => p.id === cardPageId)?.selY) || state.selY || '';
       const cardSelWellCol = c.selWellCol || (state.pages?.find(p => p.id === cardPageId)?.selWellCol) || state.selWellCol || '';
+
+      // Check if we should skip this card (only if it was an empty/non-plotted config card)
+      if (c.hasPlot === false) {
+        continue;
+      }
 
       // Fetch wells for this card's well column if needed
       if (cardSelWellCol && serverHasData) {
@@ -8433,7 +9021,7 @@ async function loadWorkspace() {
         const mergedStyles = { ...getDefaultStyles(), ...c.styles };
         cardStyles[cardId] = mergedStyles;
         applyStylesToCard(cardId, mergedStyles);
-        const headerEl = cardEl?.querySelector('.p-header');
+        const headerEl = cardEl?._headerInput || cardEl?.querySelector('.p-header');
         if (headerEl && mergedStyles.headerFontSize) {
           headerEl.style.fontSize = mergedStyles.headerFontSize + 'rem';
           headerEl.style.color = mergedStyles.headerColor || '';
@@ -8546,3 +9134,4 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }, 500);
 });
+
