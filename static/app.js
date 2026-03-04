@@ -117,6 +117,7 @@ const cardAnnotations = {};  // { cardId: [{id, x, y, xLabel, text, fontSize}] }
 const cardValueLabels = {};  // { cardId: 'none'|'top'|'bottom'|'left'|'right' }
 const cardLogScale = {};     // { cardId: boolean }
 const cardLogScaleX = {};    // { cardId: boolean }  – X-axis log scale
+const cardAxisAutoFit = {};  // { cardId: { x: bool, y: bool } } – "Fit to frame" state per axis
 
 /* Parse date string "DD.MM.YYYY" → JS timestamp */
 function parseDateStr(s) {
@@ -1764,6 +1765,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
           <label class="style-check"><input type="checkbox" class="s-p10-line" checked> Line</label>
           <label class="style-check"><input type="checkbox" class="s-p10-marker" checked> Markers</label>
           <label class="style-check"><input type="checkbox" class="s-p10-labels"> Labels</label>
+          <select class="s-p10-style"><option value="solid" selected>Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
         </div>
         <div class="style-row">
           <span class="style-label">P90 Curve</span>
@@ -1771,6 +1773,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
           <label class="style-check"><input type="checkbox" class="s-p90-line" checked> Line</label>
           <label class="style-check"><input type="checkbox" class="s-p90-marker" checked> Markers</label>
           <label class="style-check"><input type="checkbox" class="s-p90-labels"> Labels</label>
+          <select class="s-p90-style"><option value="solid" selected>Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
         </div>
       </div>
       <div class="style-section">
@@ -1820,6 +1823,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       <div class="formula-display" id="formula-${cardId}" style="display:none;"></div>
 
       <div class="param-display" id="params-${cardId}"></div>
+
+      <div class="qi-box" id="qiBox-${cardId}" style="display:none;"></div>
 
       <div class="dca-stats-summary" id="dcaStats-${cardId}" style="display:none;"></div>
 
@@ -2014,7 +2019,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 
 function getDefaultStyles() {
-  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 10, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Line: true, p10Marker: true, p10Labels: false, p90Color: '#ef4444', p90Line: true, p90Marker: true, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
+  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 10, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
 }
 
 const PLOT_THEME_PRESETS = {
@@ -2109,6 +2114,8 @@ function readCardStyles(cardId) {
     p10Marker: card.querySelector('.s-p10-marker')?.checked || false,
 
     p10Labels: card.querySelector('.s-p10-labels')?.checked || false,
+    
+    p10Style: card.querySelector('.s-p10-style')?.value || 'solid',
 
     p90Color: card.querySelector('.s-p90-color')?.value || '#ef4444',
 
@@ -2117,6 +2124,8 @@ function readCardStyles(cardId) {
     p90Marker: card.querySelector('.s-p90-marker')?.checked || false,
 
     p90Labels: card.querySelector('.s-p90-labels')?.checked || false,
+
+    p90Style: card.querySelector('.s-p90-style')?.value || 'solid',
 
     gridX: card.querySelector('.s-grid-x')?.checked !== false,
 
@@ -2199,6 +2208,8 @@ function applyStylesToCard(cardId, styles) {
   const p10m = card.querySelector('.s-p10-marker'); if (p10m) p10m.checked = merged.p10Marker || false;
 
   const p10lb = card.querySelector('.s-p10-labels'); if (p10lb) p10lb.checked = merged.p10Labels || false;
+  
+  s('.s-p10-style', merged.p10Style);
 
   s('.s-p90-color', merged.p90Color || '#ef4444');
 
@@ -2207,6 +2218,8 @@ function applyStylesToCard(cardId, styles) {
   const p90m = card.querySelector('.s-p90-marker'); if (p90m) p90m.checked = merged.p90Marker || false;
 
   const p90lb = card.querySelector('.s-p90-labels'); if (p90lb) p90lb.checked = merged.p90Labels || false;
+  
+  s('.s-p90-style', merged.p90Style);
 
   const gx = card.querySelector('.s-grid-x'); if (gx) gx.checked = merged.gridX !== false;
 
@@ -3121,33 +3134,52 @@ function updatePCurveSeries(cardId, myChart) {
 
 
   const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, null);
-
   const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
 
-
-
   seriesOpt[p10Idx].data = p10Data;
-
   seriesOpt[p10Idx].name = 'P10 (Di=' + p10DiRound + ')';
-
-  seriesOpt[p10Idx].lineStyle = { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: 'dashed' };
-
+  seriesOpt[p10Idx].lineStyle = { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: st.p10Style || 'solid' };
   seriesOpt[p10Idx].itemStyle = { color: P10_COLOR };
-
   seriesOpt[p10Idx].showSymbol = p10ShowMarker;
 
   seriesOpt[p90Idx].data = p90Data;
-
   seriesOpt[p90Idx].name = 'P90 (Di=' + p90DiRound + ')';
-
-  seriesOpt[p90Idx].lineStyle = { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: 'dashed' };
-
+  seriesOpt[p90Idx].lineStyle = { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: st.p90Style || 'solid' };
   seriesOpt[p90Idx].itemStyle = { color: P90_COLOR };
-
   seriesOpt[p90Idx].showSymbol = p90ShowMarker;
 
   myChart.setOption({ series: seriesOpt }, false);
 
+  /* Update P10/P90 stats in dcaStatsDiv */
+  const dcaStatsDivU = document.getElementById('dcaStats-' + cardId);
+  if (dcaStatsDivU) {
+    const p10Ys = p10Data.map(pt => pt[1]).filter(v => v != null && isFinite(v));
+    const p90Ys = p90Data.map(pt => pt[1]).filter(v => v != null && isFinite(v));
+    function updateStatItems(prefix, vals) {
+      if (vals.length < 2) return;
+      const first = vals[0], last = vals[vals.length - 1];
+      const diff = last - first;
+      const pct = first !== 0 ? ((diff / Math.abs(first)) * 100) : 0;
+      const sign = diff >= 0 ? '+' : '';
+      const cls = diff >= 0 ? 'positive' : 'negative';
+      dcaStatsDivU.querySelectorAll('.dca-stat-item').forEach(el => {
+        const lbl = el.querySelector('.dca-stat-label');
+        const val = el.querySelector('.dca-stat-value');
+        if (!lbl || !val) return;
+        if (lbl.textContent === prefix + ' First') { val.textContent = first.toFixed(2); }
+        else if (lbl.textContent === prefix + ' Last') { val.textContent = last.toFixed(2); }
+        else if (lbl.textContent === prefix + ' Δ') {
+          val.textContent = sign + diff.toFixed(2);
+          val.className = 'dca-stat-value ' + cls;
+        } else if (lbl.textContent === prefix + ' %') {
+          val.textContent = sign + pct.toFixed(1) + '%';
+          val.className = 'dca-stat-value ' + cls;
+        }
+      });
+    }
+    updateStatItems('P10', p10Ys);
+    updateStatItems('P90', p90Ys);
+  }
 }
 
 
@@ -3550,6 +3582,15 @@ function updateQiDisplay(cardId) {
 
   }
 
+  /* Update Qi box */
+  const qiBoxDiv = document.getElementById('qiBox-' + cardId);
+  if (qiBoxDiv && Number.isFinite(Number(p.qi))) {
+    qiBoxDiv.innerHTML = `<span class="qi-box-label">Qi</span><span class="qi-box-value">${Number(p.qi).toFixed(2)}</span>`;
+    qiBoxDiv.style.display = 'inline-flex';
+  } else if (qiBoxDiv) {
+    qiBoxDiv.style.display = 'none';
+  }
+
 }
 
 
@@ -3742,6 +3783,8 @@ function setupAxisDragHandles(cardId, myChart) {
 
       cardZoomState[cardId].yMax = newMax;
 
+      if (cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId].y = false;
+
     } else if (draggingAxis === 'x') {
 
       const dx = px - startPx;
@@ -3763,6 +3806,8 @@ function setupAxisDragHandles(cardId, myChart) {
       cardZoomState[cardId].xMin = newMin;
 
       cardZoomState[cardId].xMax = newMax;
+
+      if (cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId].x = false;
 
     }
 
@@ -3914,6 +3959,16 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   }
 
+  /* --- Qi box --- */
+  const qiBoxDiv = document.getElementById('qiBox-' + cardId);
+  if (qiBoxDiv && firstW.params && Number.isFinite(Number(firstW.params.qi))) {
+    const qiValue = Number(firstW.params.qi);
+    qiBoxDiv.innerHTML = `<span class="qi-box-label">Qi</span><span class="qi-box-value">${qiValue.toFixed(2)}</span>`;
+    qiBoxDiv.style.display = 'inline-flex';
+  } else if (qiBoxDiv) {
+    qiBoxDiv.style.display = 'none';
+  }
+
 
 
   /* --- DCA Stats: first/last values for actual and fitted --- */
@@ -3932,55 +3987,82 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     if (actualVals.length >= 2 || fittedVals.length >= 2) {
 
-      let statsHtml = '';
+      const statsRows = [];
+
+      const addStatsRow = (seriesName, first, last) => {
+        const diff = last - first;
+        const pct = first !== 0 ? ((diff / Math.abs(first)) * 100) : 0;
+        const sign = diff >= 0 ? '+' : '';
+        const cls = diff >= 0 ? 'positive' : 'negative';
+        statsRows.push({
+          seriesName,
+          first,
+          last,
+          diff,
+          pct,
+          sign,
+          cls,
+        });
+      };
 
       if (actualVals.length >= 2) {
-
         const aFirst = actualVals[0], aLast = actualVals[actualVals.length - 1];
-
-        const aDiff = aLast - aFirst;
-
-        const aPct = aFirst !== 0 ? ((aDiff / Math.abs(aFirst)) * 100) : 0;
-
-        const aSign = aDiff >= 0 ? '+' : '';
-
-        const aCls = aDiff >= 0 ? 'positive' : 'negative';
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Actual First</div><div class="dca-stat-value">${aFirst.toFixed(2)}</div></div>`;
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Actual Last</div><div class="dca-stat-value">${aLast.toFixed(2)}</div></div>`;
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Actual Δ</div><div class="dca-stat-value ${aCls}">${aSign}${aDiff.toFixed(2)}</div></div>`;
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Actual %</div><div class="dca-stat-value ${aCls}">${aSign}${aPct.toFixed(1)}%</div></div>`;
-
+        addStatsRow('Actual', aFirst, aLast);
       }
 
       if (fittedVals.length >= 2) {
-
         const fFirst = fittedVals[0], fLast = fittedVals[fittedVals.length - 1];
-
-        const fDiff = fLast - fFirst;
-
-        const fPct = fFirst !== 0 ? ((fDiff / Math.abs(fFirst)) * 100) : 0;
-
-        const fSign = fDiff >= 0 ? '+' : '';
-
-        const fCls = fDiff >= 0 ? 'positive' : 'negative';
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Fitted First</div><div class="dca-stat-value">${fFirst.toFixed(2)}</div></div>`;
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Fitted Last</div><div class="dca-stat-value">${fLast.toFixed(2)}</div></div>`;
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Fitted Δ</div><div class="dca-stat-value ${fCls}">${fSign}${fDiff.toFixed(2)}</div></div>`;
-
-        statsHtml += `<div class="dca-stat-item"><div class="dca-stat-label">Fitted %</div><div class="dca-stat-value ${fCls}">${fSign}${fPct.toFixed(1)}%</div></div>`;
-
+        addStatsRow('Fitted', fFirst, fLast);
       }
 
-      dcaStatsDiv.innerHTML = statsHtml;
+      /* --- P10 / P90 stats --- */
+      const pcs = cardPCurveState[cardId];
+      if (pcs && sw.params && sw.t) {
+        const isDateStat = firstW.is_date || false;
+        const p10Pts = buildPCurveData(sw, data, pcs.p10Di, isDateStat, null);
+        const p90Pts = buildPCurveData(sw, data, pcs.p90Di, isDateStat, null);
+        const p10Ys = p10Pts.map(p => p[1]).filter(v => v != null && isFinite(v));
+        const p90Ys = p90Pts.map(p => p[1]).filter(v => v != null && isFinite(v));
+        if (p10Ys.length >= 2) {
+          const p10First = p10Ys[0], p10Last = p10Ys[p10Ys.length - 1];
+          addStatsRow('P10', p10First, p10Last);
+        }
+        if (p90Ys.length >= 2) {
+          const p90First = p90Ys[0], p90Last = p90Ys[p90Ys.length - 1];
+          addStatsRow('P90', p90First, p90Last);
+        }
+      }
 
-      dcaStatsDiv.style.display = 'flex';
+      if (statsRows.length > 0) {
+        const rowsHtml = statsRows.map(r => (
+          `<tr>`
+            + `<td class="dca-mini-series">${r.seriesName}</td>`
+            + `<td>${r.first.toFixed(2)}</td>`
+            + `<td>${r.last.toFixed(2)}</td>`
+            + `<td class="${r.cls}">${r.sign}${r.diff.toFixed(2)}</td>`
+            + `<td class="${r.cls}">${r.sign}${r.pct.toFixed(1)}%</td>`
+          + `</tr>`
+        )).join('');
+
+        dcaStatsDiv.innerHTML = `
+          <table class="dca-mini-table">
+            <thead>
+              <tr>
+                <th>Series</th>
+                <th>First</th>
+                <th>Last</th>
+                <th>Δ</th>
+                <th>%</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        `;
+
+        dcaStatsDiv.style.display = 'block';
+      } else {
+        dcaStatsDiv.style.display = 'none';
+      }
 
     } else {
 
@@ -4189,29 +4271,23 @@ function renderSingleChart(cardId, data, forecastMonths) {
       const P10_COLOR = st.p10Color || '#22c55e', P90_COLOR = st.p90Color || '#ef4444';
 
       const p10ShowLine = st.p10Line !== false, p10ShowMarker = st.p10Marker || false;
-
       const p90ShowLine = st.p90Line !== false, p90ShowMarker = st.p90Marker || false;
-
       const p10DiRound = Math.round(ps.p10Di * 1e6) / 1e6;
-
       const p90DiRound = Math.round(ps.p90Di * 1e6) / 1e6;
 
-
-
       const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, null);
-
       const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
 
       series.push({
         name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
-        lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: 'dashed' }, itemStyle: { color: P10_COLOR },
+        lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: st.p10Style || 'solid' }, itemStyle: { color: P10_COLOR },
         label: st.p10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
         data: p10Data
       });
 
       series.push({
         name: prefix + 'P90 (Di=' + p90DiRound + ')', type: 'line', z: 1, showSymbol: p90ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
-        lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: 'dashed' }, itemStyle: { color: P90_COLOR },
+        lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: st.p90Style || 'solid' }, itemStyle: { color: P90_COLOR },
         label: st.p90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
         data: p90Data
       });
@@ -4438,7 +4514,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       position: axPos.x,
 
-      min: useLogScaleX ? 0.01 : (isDate ? dateMin : undefined),
+      min: (useLogScaleX && !(cardAxisAutoFit[cardId] && cardAxisAutoFit[cardId].x)) ? 0.01 : (isDate ? dateMin : undefined),
 
       max: isDate ? dateMax : undefined,
 
@@ -4479,15 +4555,19 @@ function renderSingleChart(cardId, data, forecastMonths) {
       axisLabel: {
         color: lbC,
         formatter: function(val) {
+          if (!Number.isFinite(val)) return '';
+          const absVal = Math.abs(val);
           if (Math.abs(val) >= 1000000) {
             return (val / 1000000).toFixed(1) + 'M';
           } else if (Math.abs(val) >= 1000) {
             return (val / 1000).toFixed(1) + 'k';
           }
-          return val;
+          if (absVal >= 1) return Number(val.toFixed(2)).toString();
+          if (absVal >= 0.01) return Number(val.toFixed(4)).toString();
+          return Number(val.toPrecision(3)).toString();
         }
       },
-      min: useLogScale ? 0.01 : undefined
+      min: (useLogScale && !(cardAxisAutoFit[cardId] && cardAxisAutoFit[cardId].y)) ? 0.01 : undefined
     },
 
     
@@ -4868,6 +4948,12 @@ function applyZoom(chart, rect, mode, cardId) {
 
   cardZoomState[cardId] = { xMin: (mode === 'box' || mode === 'x') ? xMin : null, xMax: (mode === 'box' || mode === 'x') ? xMax : null, yMin: (mode === 'box' || mode === 'y') ? yMin : null, yMax: (mode === 'box' || mode === 'y') ? yMax : null };
 
+  /* Manual zoom overrides "Fit to frame" auto-fit */
+  if (cardAxisAutoFit[cardId]) {
+    if (mode === 'box' || mode === 'x') cardAxisAutoFit[cardId].x = false;
+    if (mode === 'box' || mode === 'y') cardAxisAutoFit[cardId].y = false;
+  }
+
   setResetZoomButtonsVisible(cardId, true);
   
   // Sync to parallel chart instances depending on which triggered the zoom
@@ -4892,6 +4978,8 @@ function resetZoom(cardId) {
 
   delete cardZoomState[cardId];
 
+  delete cardAxisAutoFit[cardId];
+
   setResetZoomButtonsVisible(cardId, false);
 
 }
@@ -4903,6 +4991,8 @@ function resetAll(cardId) {
   cardExclusions[cardId] = new Set();
 
   delete cardZoomState[cardId];
+
+  delete cardAxisAutoFit[cardId];
 
   setResetZoomButtonsVisible(cardId, false);
 
@@ -5839,6 +5929,9 @@ function _axisZoom(cardId, axis, factor, chartKey) {
   const grid = chart.getModel().getComponent('grid', 0);
   if (!grid) return;
   const rect = grid.coordinateSystem.getRect();
+  const opt = chart.getOption() || {};
+  const axisOpt = axis === 'x' ? ((opt.xAxis && opt.xAxis[0]) || {}) : ((opt.yAxis && opt.yAxis[0]) || {});
+  const isLogAxis = axisOpt && axisOpt.type === 'log';
 
   let curMin, curMax;
   if (axis === 'x') {
@@ -5852,11 +5945,23 @@ function _axisZoom(cardId, axis, factor, chartKey) {
 
   if (curMin == null || curMax == null || isNaN(curMin) || isNaN(curMax)) return;
 
-  const range = curMax - curMin;
-  const center = (curMin + curMax) / 2;
-  const newRange = range * factor;
-  const mn = center - newRange / 2;
-  const mx = center + newRange / 2;
+  let mn, mx;
+  if (isLogAxis) {
+    const safeMin = Math.max(Number(curMin), 1e-12);
+    const safeMax = Math.max(Number(curMax), safeMin * 1.000001);
+    const logMin = Math.log10(safeMin);
+    const logMax = Math.log10(safeMax);
+    const logCenter = (logMin + logMax) / 2;
+    const logSpan = Math.max((logMax - logMin) * factor, 1e-9);
+    mn = Math.pow(10, logCenter - logSpan / 2);
+    mx = Math.pow(10, logCenter + logSpan / 2);
+  } else {
+    const range = curMax - curMin;
+    const center = (curMin + curMax) / 2;
+    const newRange = range * factor;
+    mn = center - newRange / 2;
+    mx = center + newRange / 2;
+  }
 
   const setObj = {};
   if (axis === 'x') setObj.xAxis = { min: mn, max: mx };
@@ -5870,8 +5975,8 @@ function _axisZoom(cardId, axis, factor, chartKey) {
 
   /* Save zoom state */
   if (!cardZoomState[cardId]) cardZoomState[cardId] = {};
-  if (axis === 'x') { cardZoomState[cardId].xMin = mn; cardZoomState[cardId].xMax = mx; }
-  else { cardZoomState[cardId].yMin = mn; cardZoomState[cardId].yMax = mx; }
+  if (axis === 'x') { cardZoomState[cardId].xMin = mn; cardZoomState[cardId].xMax = mx; if (cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId].x = false; }
+  else { cardZoomState[cardId].yMin = mn; cardZoomState[cardId].yMax = mx; if (cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId].y = false; }
   setResetZoomButtonsVisible(cardId, true);
 }
 
@@ -5882,11 +5987,26 @@ function _axisFit(cardId, axis, chartKey) {
   if (!chart || !origOpt) return;
   const setObj = {};
   if (axis === 'x') {
-    setObj.xAxis = { min: origOpt.xAxis.min || null, max: origOpt.xAxis.max || null };
+    /* For log-scale axes the stored min is a sentinel (0.01) to avoid log(0).
+       Pass null so ECharts auto-fits to the actual data range instead. */
+    const xIsLog = (origOpt.xAxis && origOpt.xAxis.type === 'log');
+    setObj.xAxis = {
+      min: xIsLog ? null : (origOpt.xAxis.min || null),
+      max: xIsLog ? null : (origOpt.xAxis.max || null)
+    };
     if (cardZoomState[cardId]) { delete cardZoomState[cardId].xMin; delete cardZoomState[cardId].xMax; }
+    if (!cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId] = {};
+    cardAxisAutoFit[cardId].x = true;
   } else {
-    setObj.yAxis = { min: origOpt.yAxis.min || null, max: origOpt.yAxis.max || null };
+    /* Same sentinel issue for the Y axis in log mode. */
+    const yIsLog = (origOpt.yAxis && origOpt.yAxis.type === 'log');
+    setObj.yAxis = {
+      min: yIsLog ? null : (origOpt.yAxis.min || null),
+      max: yIsLog ? null : (origOpt.yAxis.max || null)
+    };
     if (cardZoomState[cardId]) { delete cardZoomState[cardId].yMin; delete cardZoomState[cardId].yMax; }
+    if (!cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId] = {};
+    cardAxisAutoFit[cardId].y = true;
   }
   chart.setOption(setObj);
   const fullId = 'fullChart-' + cardId;
@@ -5994,8 +6114,8 @@ function _axisMoveToOpposite(cardId, axis) {
     if (chart === miniChart && fullChart) fullChart.setOption(setObj);
     if (chart === fullChart && miniChart) miniChart.setOption(setObj);
     if (!cardZoomState[cardId]) cardZoomState[cardId] = {};
-    if (axis === 'x') { cardZoomState[cardId].xMin = minVal; cardZoomState[cardId].xMax = maxVal; }
-    else { cardZoomState[cardId].yMin = minVal; cardZoomState[cardId].yMax = maxVal; }
+    if (axis === 'x') { cardZoomState[cardId].xMin = minVal; cardZoomState[cardId].xMax = maxVal; if (cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId].x = false; }
+    else { cardZoomState[cardId].yMin = minVal; cardZoomState[cardId].yMax = maxVal; if (cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId].y = false; }
     if (minVal != null || maxVal != null) {
       setResetZoomButtonsVisible(cardId, true);
     }
