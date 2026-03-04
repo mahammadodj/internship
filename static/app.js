@@ -131,6 +131,7 @@ function formatDateTs(ts) {
   return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear();
 }
 const cardPctChange = {};    // { cardId: boolean }
+const cardLabelCollapseStates = {}; // { cardId: { actual: bool, p10: bool, ... } }
 const cardAxisLabels = {};   // { cardId: {x:string, y:string} }
 const cardAxisPositions = {}; // { cardId: {x:'bottom'|'top', y:'left'|'right'} }
 const cardTableData = {};    // { cardId: [{well, section, time, actual, fitted}] }
@@ -1826,6 +1827,14 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="qi-box" id="qiBox-${cardId}" style="display:none;"></div>
 
+      <div class="qi-input-panel" id="qiInputPanel-${cardId}" style="display:none;">
+        <span class="qi-input-label">Set Qi:</span>
+        <input type="number" id="qiValueInput-${cardId}" class="qi-input-field" placeholder="Value" step="any" title="Qi value">
+        <span class="qi-input-label">at</span>
+        <input type="date" id="qiDateInput-${cardId}" class="qi-input-field qi-date-field" title="Anchor date (leave empty for start)">
+        <button class="qi-input-btn" onclick="applyQiFromInput('${cardId}')" title="Apply Qi">Apply</button>
+      </div>
+
       <div class="dca-stats-summary" id="dcaStats-${cardId}" style="display:none;"></div>
 
       <div class="excl-hint" id="exclHint-${cardId}">Click scatter points to exclude them from curve fitting</div>
@@ -2114,7 +2123,7 @@ function readCardStyles(cardId) {
     p10Marker: card.querySelector('.s-p10-marker')?.checked || false,
 
     p10Labels: card.querySelector('.s-p10-labels')?.checked || false,
-    
+
     p10Style: card.querySelector('.s-p10-style')?.value || 'solid',
 
     p90Color: card.querySelector('.s-p90-color')?.value || '#ef4444',
@@ -2208,7 +2217,7 @@ function applyStylesToCard(cardId, styles) {
   const p10m = card.querySelector('.s-p10-marker'); if (p10m) p10m.checked = merged.p10Marker || false;
 
   const p10lb = card.querySelector('.s-p10-labels'); if (p10lb) p10lb.checked = merged.p10Labels || false;
-  
+
   s('.s-p10-style', merged.p10Style);
 
   s('.s-p90-color', merged.p90Color || '#ef4444');
@@ -2218,7 +2227,7 @@ function applyStylesToCard(cardId, styles) {
   const p90m = card.querySelector('.s-p90-marker'); if (p90m) p90m.checked = merged.p90Marker || false;
 
   const p90lb = card.querySelector('.s-p90-labels'); if (p90lb) p90lb.checked = merged.p90Labels || false;
-  
+
   s('.s-p90-style', merged.p90Style);
 
   const gx = card.querySelector('.s-grid-x'); if (gx) gx.checked = merged.gridX !== false;
@@ -2390,20 +2399,20 @@ function openFullView(cardId) {
 
     const isLight = document.documentElement.getAttribute('data-theme') === 'light';
     const fullChart = echarts.init(chartDiv, isLight ? null : 'dark');
-    
+
     const opts = existingChart.getOption();
-    if(opts) {
-        // Ensure the chart resizes properly
-        opts.grid = opts.grid || {};
-        // Reset grid to be responsive or fit the new container
-        // Actually, copying options might carry over fixed pixel sizes if they were set.
-        // Let's rely on ECharts default responsiveness if 'containLabel' is true.
-        
-        fullChart.setOption(opts);
+    if (opts) {
+      // Ensure the chart resizes properly
+      opts.grid = opts.grid || {};
+      // Reset grid to be responsive or fit the new container
+      // Actually, copying options might carry over fixed pixel sizes if they were set.
+      // Let's rely on ECharts default responsiveness if 'containLabel' is true.
+
+      fullChart.setOption(opts);
     }
     const z = cardZoomState[cardId];
     setResetZoomButtonsVisible(cardId, !!(z && (z.xMin != null || z.xMax != null || z.yMin != null || z.yMax != null)));
-    
+
     // Store full chart instance
     chartInstances[fullId] = fullChart;
 
@@ -2440,21 +2449,21 @@ function openFullView(cardId) {
     setupAxisDragHandles(cardId, fullChart);
     setupBoxSelection(cardId, fullChart, chartDiv);
     setupAxisHoverTooltip(cardId, chartDiv); // cardId allows axis hover to read same global axis styles
-    
+
     // Resize observer to handle window resize while modal is open
     const resizeObserver = new ResizeObserver(() => fullChart.resize());
     resizeObserver.observe(chartDiv);
-    
+
     // Clean up observer when modal is removed
     const overlay = document.querySelector('.modal-overlay');
-    if(overlay) {
-        const originalRemove = overlay.remove.bind(overlay);
-        overlay.remove = function() {
-            resizeObserver.disconnect();
-            fullChart.dispose();
-            delete chartInstances[fullId]; // Clean up instance
-            originalRemove();
-        };
+    if (overlay) {
+      const originalRemove = overlay.remove.bind(overlay);
+      overlay.remove = function () {
+        resizeObserver.disconnect();
+        fullChart.dispose();
+        delete chartInstances[fullId]; // Clean up instance
+        originalRemove();
+      };
     }
   });
 }
@@ -2484,6 +2493,107 @@ function saveZoomState(cardId) {
    P10 / P50 / P90 – Physics-based drag (recalculates decline rate D)
 
    ==================================================================== */
+
+function toggleLabelCollapse(cardId, type) {
+  if (!cardLabelCollapseStates[cardId]) cardLabelCollapseStates[cardId] = {};
+  cardLabelCollapseStates[cardId][type] = !cardLabelCollapseStates[cardId][type];
+
+  // Update both mini and full charts if they exist
+  const mChart = chartInstances[cardId];
+  if (mChart) updatePctChangeGraphic(cardId, mChart);
+  const fChart = chartInstances['fullChart-' + cardId];
+  if (fChart) updatePctChangeGraphic(cardId, fChart);
+}
+
+/* Logic to generate specialized % change graphic elements */
+function getPctChangeGraphic(cardId) {
+  const showPct = cardPctChange[cardId] || false;
+  if (!showPct) return [];
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length === 0) return [];
+  const pw = data.wells[0];
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const isDate = pw.is_date || false;
+  const colStates = cardLabelCollapseStates[cardId] || {};
+
+  let graphicElems = [];
+  let pctTopOffset = 55;
+
+  const pushPctGraphic = (type, labelPrefix, fVal, lVal, fDate, lDate, ovrCol) => {
+    const isCollapsed = colStates[type] || false;
+    const diff = lVal - fVal;
+    const pct = fVal !== 0 ? ((diff / Math.abs(fVal)) * 100) : 0;
+    const sign = diff >= 0 ? '+' : '';
+    const toggleIcon = isCollapsed ? '[+] ' : '[-] ';
+
+    let pctText;
+    if (isCollapsed) {
+      pctText = `${toggleIcon}${labelPrefix}\u0394 ${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(1)}%)`;
+    } else {
+      pctText = `${toggleIcon}${labelPrefix}[${fDate}] ${fVal.toFixed(2)} \u2192 [${lDate}] ${lVal.toFixed(2)}  |  \u0394 ${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(1)}%)`;
+    }
+
+    const color = ovrCol || (diff >= 0 ? '#22c55e' : '#ef4444');
+    const borderColor = ovrCol || (diff >= 0 ? 'rgba(34,197,94,.4)' : 'rgba(239,68,68,.4)');
+
+    graphicElems.push({
+      type: 'text', right: 40, top: pctTopOffset, z: 100,
+      cursor: 'pointer',
+      onclick: () => toggleLabelCollapse(cardId, type),
+      style: {
+        text: pctText, fontSize: 11.2, fontWeight: 'bold',
+        fill: color,
+        backgroundColor: isLight ? 'rgba(255,255,255,.92)' : 'rgba(34,37,51,.92)',
+        borderColor: borderColor,
+        borderWidth: 1.2, padding: [6, 12, 6, 12], borderRadius: 4,
+        shadowBlur: 6, shadowColor: 'rgba(0,0,0,0.15)', shadowOffsetX: 1, shadowOffsetY: 2
+      },
+      emphasis: {
+        style: {
+          shadowBlur: 10,
+          backgroundColor: isLight ? '#fff' : '#2d3142'
+        }
+      }
+    });
+    pctTopOffset += isCollapsed ? 30 : 35;
+  };
+
+  /* Actual data */
+  const validIndices = [];
+  pw.y_actual.forEach((v, i) => { if (v != null) validIndices.push(i); });
+  if (validIndices.length >= 2) {
+    const firstIdx = validIndices[0], lastIdx = validIndices[validIndices.length - 1];
+    pushPctGraphic('actual', '', pw.y_actual[firstIdx], pw.y_actual[lastIdx], pw.x[firstIdx], pw.x[lastIdx]);
+  }
+
+  /* P10 / P50 / P90 curves */
+  if (pw.params && pw.y_fitted) {
+    const ps = cardPCurveState[cardId];
+    const st = readCardStyles(cardId) || {};
+
+    const addPCurvePct = (type, name, diVal, color) => {
+      const pts = buildPCurveData(pw, data, diVal, isDate, null);
+      const validPts = pts.filter(p => p[1] != null && isFinite(p[1]));
+      if (validPts.length >= 2) {
+        const fPt = validPts[0], lPt = validPts[validPts.length - 1];
+        const fDateStr = isDate ? formatDateTs(fPt[0]) : fPt[0];
+        const lDateStr = isDate ? formatDateTs(lPt[0]) : lPt[0];
+        pushPctGraphic(type, name + ': ', fPt[1], lPt[1], fDateStr, lDateStr, color);
+      }
+    };
+
+    if (ps && ps.enabled) addPCurvePct('p10', 'P10', ps.p10Di, st.p10Color || '#22c55e');
+    addPCurvePct('p50', 'P50', Math.abs(pw.params.di), st.fittedColor || '#f59e0b');
+    if (ps && ps.enabled) addPCurvePct('p90', 'P90', ps.p90Di, st.p90Color || '#ef4444');
+  }
+  return graphicElems;
+}
+
+/* Live-update the % change / diff graphic elements on the chart */
+function updatePctChangeGraphic(cardId, myChart) {
+  const graphicElems = getPctChangeGraphic(cardId);
+  myChart.setOption({ graphic: graphicElems }, false);
+}
 
 
 
@@ -3150,6 +3260,9 @@ function updatePCurveSeries(cardId, myChart) {
 
   myChart.setOption({ series: seriesOpt }, false);
 
+  /* Live-update the % change graphic labels */
+  updatePctChangeGraphic(cardId, myChart);
+
   /* Update P10/P90 stats in dcaStatsDiv */
   const dcaStatsDivU = document.getElementById('dcaStats-' + cardId);
   if (dcaStatsDivU) {
@@ -3414,6 +3527,9 @@ function setupQiDragHandle(cardId, myChart) {
 
     if (ps && ps.enabled) updatePCurveSeries(cardId, myChart);
 
+    /* Live-update the % change graphic labels (P50 changed) */
+    updatePctChangeGraphic(cardId, myChart);
+
     /* Update formula display */
 
     updateQiDisplay(cardId);
@@ -3584,11 +3700,33 @@ function updateQiDisplay(cardId) {
 
   /* Update Qi box */
   const qiBoxDiv = document.getElementById('qiBox-' + cardId);
+  const qiInputPanel = document.getElementById('qiInputPanel-' + cardId);
+  const isDate = w.is_date || false;
+
   if (qiBoxDiv && Number.isFinite(Number(p.qi))) {
     qiBoxDiv.innerHTML = `<span class="qi-box-label">Qi</span><span class="qi-box-value">${Number(p.qi).toFixed(2)}</span>`;
     qiBoxDiv.style.display = 'inline-flex';
+    if (qiInputPanel) {
+      qiInputPanel.style.display = 'flex';
+      /* Pre-fill current Qi value */
+      const qiValInput = document.getElementById('qiValueInput-' + cardId);
+      if (qiValInput && !qiValInput.value) qiValInput.value = Number(p.qi).toFixed(2);
+
+      /* Set correct input type for date vs numeric */
+      const qiDateInput = document.getElementById('qiDateInput-' + cardId);
+      if (qiDateInput) {
+        if (isDate) {
+          qiDateInput.type = 'date';
+          qiDateInput.placeholder = 'YYYY-MM-DD';
+        } else {
+          qiDateInput.type = 'number';
+          qiDateInput.placeholder = 'X Value';
+        }
+      }
+    }
   } else if (qiBoxDiv) {
     qiBoxDiv.style.display = 'none';
+    if (qiInputPanel) qiInputPanel.style.display = 'none';
   }
 
 }
@@ -4036,11 +4174,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
       if (statsRows.length > 0) {
         const rowsHtml = statsRows.map(r => (
           `<tr>`
-            + `<td class="dca-mini-series">${r.seriesName}</td>`
-            + `<td>${r.first.toFixed(2)}</td>`
-            + `<td>${r.last.toFixed(2)}</td>`
-            + `<td class="${r.cls}">${r.sign}${r.diff.toFixed(2)}</td>`
-            + `<td class="${r.cls}">${r.sign}${r.pct.toFixed(1)}%</td>`
+          + `<td class="dca-mini-series">${r.seriesName}</td>`
+          + `<td>${r.first.toFixed(2)}</td>`
+          + `<td>${r.last.toFixed(2)}</td>`
+          + `<td class="${r.cls}">${r.sign}${r.diff.toFixed(2)}</td>`
+          + `<td class="${r.cls}">${r.sign}${r.pct.toFixed(1)}%</td>`
           + `</tr>`
         )).join('');
 
@@ -4433,42 +4571,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   /* --- % Change & Difference graphic --- */
 
-  const showPct = cardPctChange[cardId] || false;
-
-  let graphicElems = [];
-  if (showPct && allWellsData.length > 0) {
-    const pw = allWellsData[0];
-    const validIndices = [];
-    pw.y_actual.forEach((v, i) => { if (v != null) validIndices.push(i); });
-    if (validIndices.length >= 2) {
-      const firstIdx = validIndices[0], lastIdx = validIndices[validIndices.length - 1];
-      const firstVal = pw.y_actual[firstIdx], lastVal = pw.y_actual[lastIdx];
-      const firstDate = pw.x[firstIdx], lastDate = pw.x[lastIdx];
-      const diff = lastVal - firstVal;
-      const pct = firstVal !== 0 ? ((diff / Math.abs(firstVal)) * 100) : 0;
-      const sign = diff >= 0 ? '+' : '';
-      const pctText = `[${firstDate}] ${firstVal.toFixed(2)} \u2192 [${lastDate}] ${lastVal.toFixed(2)}  |  \u0394 ${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(1)}%)`;
-      graphicElems.push({
-        type: 'text', right: 40, top: 55, z: 100,
-        style: {
-
-          text: pctText, fontSize: 11.5, fontWeight: 'bold',
-
-          fill: diff >= 0 ? '#22c55e' : '#ef4444',
-
-          backgroundColor: isLight ? 'rgba(255,255,255,.88)' : 'rgba(34,37,51,.88)',
-
-          borderColor: diff >= 0 ? 'rgba(34,197,94,.4)' : 'rgba(239,68,68,.4)',
-
-          borderWidth: 1, padding: [6, 12], borderRadius: 4
-
-        }
-
-      });
-
-    }
-
-  }
+  const graphicElems = getPctChangeGraphic(cardId);
 
 
   const axPos = cardAxisPositions[cardId] || { x: 'bottom', y: 'left' };
@@ -4495,14 +4598,16 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     },
 
-    tooltip: { trigger: 'item', axisPointer: { type: 'cross', lineStyle: { color: 'var(--text-dim, #999)', type: 'dashed' } }, formatter: function(p) {
-      if (!p || p.seriesName.endsWith('_bridge') || p.seriesName.startsWith('_')) return '';
-      let val = Array.isArray(p.data) ? p.data[1] : p.data;
-      if (val == null) return '';
-      let header = isDate ? '<b>' + formatDateTs(Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>' : '<b>' + (Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>';
-      header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
-      return header;
-    } },
+    tooltip: {
+      trigger: 'item', axisPointer: { type: 'cross', lineStyle: { color: 'var(--text-dim, #999)', type: 'dashed' } }, formatter: function (p) {
+        if (!p || p.seriesName.endsWith('_bridge') || p.seriesName.startsWith('_')) return '';
+        let val = Array.isArray(p.data) ? p.data[1] : p.data;
+        if (val == null) return '';
+        let header = isDate ? '<b>' + formatDateTs(Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>' : '<b>' + (Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>';
+        header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
+        return header;
+      }
+    },
 
     legend: { data: legendData, top: 4, left: 60, textStyle: { color: lbC, fontSize: 11 } },
 
@@ -4534,7 +4639,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       axisLabel: {
         color: lbC, rotate: isDate ? 45 : 0, fontSize: isDate ? 10 : 12, hideOverlap: true, showMinLabel: true, showMaxLabel: true,
-        formatter: isDate ? function(val) { return formatDateTs(val); } : undefined
+        formatter: isDate ? function (val) { return formatDateTs(val); } : undefined
       }
 
     },
@@ -4554,7 +4659,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
       axisLine: { lineStyle: { color: axC } },
       axisLabel: {
         color: lbC,
-        formatter: function(val) {
+        formatter: function (val) {
           if (!Number.isFinite(val)) return '';
           const absVal = Math.abs(val);
           if (Math.abs(val) >= 1000000) {
@@ -4570,7 +4675,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
       min: (useLogScale && !(cardAxisAutoFit[cardId] && cardAxisAutoFit[cardId].y)) ? 0.01 : undefined
     },
 
-    
+
     series: series
 
   };
@@ -4955,7 +5060,7 @@ function applyZoom(chart, rect, mode, cardId) {
   }
 
   setResetZoomButtonsVisible(cardId, true);
-  
+
   // Sync to parallel chart instances depending on which triggered the zoom
   const fullId = 'fullChart-' + cardId;
   const miniChart = chartInstances[cardId];
@@ -4972,7 +5077,7 @@ function resetZoom(cardId) {
   const chart = chartInstances[cardId], origOpt = cardOptions[cardId];
 
   if (chart && origOpt) chart.setOption({ xAxis: { min: origOpt.xAxis.min || null, max: origOpt.xAxis.max || null }, yAxis: { min: origOpt.yAxis.min || null, max: origOpt.yAxis.max || null } });
-  
+
   const fullChart = chartInstances['fullChart-' + cardId];
   if (fullChart && origOpt) fullChart.setOption({ xAxis: { min: origOpt.xAxis.min || null, max: origOpt.xAxis.max || null }, yAxis: { min: origOpt.yAxis.min || null, max: origOpt.yAxis.max || null } });
 
@@ -5354,6 +5459,194 @@ document.addEventListener('click', function (e) {
 
 
 
+/* --- Set Qi at any point --- */
+
+/* Convert an X coordinate (date timestamp or numeric) to a t value for the decline model */
+function xToT(w, xVal) {
+  const isDate = w.is_date || false;
+  if (isDate) {
+    /* Find the closest data point by date, use its t value, or interpolate */
+    let bestIdx = 0, bestDiff = Infinity;
+    for (let i = 0; i < w.x.length; i++) {
+      const ts = parseDateStr(w.x[i]);
+      const d = Math.abs(ts - xVal);
+      if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+    }
+    /* Also check forecast dates */
+    if (w.forecast && w.forecast.x) {
+      for (let i = 0; i < w.forecast.x.length; i++) {
+        const ts = parseDateStr(w.forecast.x[i]);
+        const d = Math.abs(ts - xVal);
+        if (d < bestDiff) {
+          bestDiff = d;
+          if (w.forecast.t) return w.forecast.t[i];
+        }
+      }
+    }
+    return w.t[bestIdx];
+  } else {
+    /* Numeric axis: t ≈ xVal - x[0] + t[0] */
+    if (w.t.length === 0) return 0;
+    return Math.max(0, xVal - w.x[0] + w.t[0]);
+  }
+}
+
+/* Core logic: apply a new Qi anchored at a specific t value, so that q(t_anchor) = qiValue.
+   Solves for actual qi at t=0: qi_t0 = qiValue / f(t_anchor) where f uses qi=1 */
+function applyQiAtT(cardId, tAnchor, qiValue) {
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length !== 1) return;
+  const w = data.wells[0];
+  if (!w.y_fitted || !w.params || !w.t) return;
+
+  const model = data.model || 'exponential';
+  const isDate = w.is_date || false;
+
+  /* Solve for qi at t=0 such that q(tAnchor) = qiValue */
+  let qi_t0;
+  if (tAnchor <= 0) {
+    qi_t0 = qiValue;  /* At t=0, qi_t0 = qiValue */
+  } else {
+    /* f(t) = evalDeclineModel with qi=1 gives the decay factor */
+    const decayFactor = evalDeclineModel(model, tAnchor, { qi: 1, di: w.params.di, b: w.params.b });
+    if (!decayFactor || decayFactor <= 0) {
+      qi_t0 = qiValue;
+    } else {
+      qi_t0 = qiValue / decayFactor;
+    }
+  }
+
+  w.params.qi = Math.round(qi_t0 * 1e6) / 1e6;
+
+  /* Recalculate fitted values */
+  for (let i = 0; i < w.t.length; i++) {
+    if (w.y_fitted[i] != null) w.y_fitted[i] = evalDeclineModel(model, w.t[i], w.params);
+  }
+
+  /* Recalculate forecast values */
+  if (w.forecast && w.forecast.t) {
+    for (let i = 0; i < w.forecast.t.length; i++) {
+      w.forecast.y[i] = evalDeclineModel(model, w.forecast.t[i], w.params);
+    }
+  }
+
+  /* Update both mini and full charts */
+  const refreshChart = (myChart) => {
+    if (!myChart) return;
+    const opt = myChart.getOption();
+    const seriesOpt = opt.series;
+
+    for (let si = 0; si < seriesOpt.length; si++) {
+      const s = seriesOpt[si];
+      if (!s.name) continue;
+      if (s.name.endsWith('Fitted')) {
+        seriesOpt[si].data = isDate
+          ? w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]])
+          : w.x.map((xv, i) => [xv, w.y_fitted[i]]);
+      }
+      if (s.name.endsWith('Forecast') && w.forecast && w.forecast.x) {
+        const fData = [];
+        let lfi = (w.y_fitted || []).length - 1;
+        while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--;
+        if (lfi >= 0) {
+          const bx = isDate ? parseDateStr(w.x[lfi]) : w.x[lfi];
+          fData.push([bx, w.y_fitted[lfi]]);
+        }
+        for (let i = 0; i < w.forecast.x.length; i++) {
+          const xv = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
+          fData.push([xv, w.forecast.y[i]]);
+        }
+        seriesOpt[si].data = fData;
+      }
+    }
+    myChart.setOption({ series: seriesOpt }, false);
+    const ps = cardPCurveState[cardId];
+    if (ps && ps.enabled) updatePCurveSeries(cardId, myChart);
+    updatePctChangeGraphic(cardId, myChart);
+  };
+
+  refreshChart(chartInstances[cardId]);
+  refreshChart(chartInstances['fullChart-' + cardId]);
+  updateQiDisplay(cardId);
+}
+
+/* Context menu handler: set Qi so curve passes through (X_click, Y_click) */
+function setQiAtPoint(cardId) {
+  const coord = _ctxMenuCoord;
+  if (!coord) return;
+
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length !== 1) {
+    showToast('Set Qi is only available for single-well charts', 'warning');
+    return;
+  }
+  const w = data.wells[0];
+  if (!w.y_fitted || !w.params || !w.t) {
+    showToast('No fitted curve to adjust', 'warning');
+    return;
+  }
+
+  const qiValue = coord.y;
+  if (!qiValue || qiValue <= 0) {
+    showToast('Qi must be a positive value', 'warning');
+    return;
+  }
+
+  /* Convert clicked X to t value */
+  const tAnchor = xToT(w, coord.x);
+
+  applyQiAtT(cardId, tAnchor, qiValue);
+
+  const qAtClick = qiValue.toFixed(2);
+  const dateLabel = coord.xLabel || '';
+  showToast(`Qi set: q(${dateLabel}) = ${qAtClick}`, 'info', 3000);
+}
+
+/* Input widget handler: set Qi from the card's input controls */
+function applyQiFromInput(cardId) {
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length !== 1) {
+    showToast('Set Qi is only available for single-well charts', 'warning');
+    return;
+  }
+  const w = data.wells[0];
+  if (!w.y_fitted || !w.params || !w.t) {
+    showToast('No fitted curve to adjust', 'warning');
+    return;
+  }
+
+  const qiInput = document.getElementById('qiValueInput-' + cardId);
+  const dateInput = document.getElementById('qiDateInput-' + cardId);
+  if (!qiInput) return;
+
+  const qiValue = parseFloat(qiInput.value);
+  if (!qiValue || qiValue <= 0 || !isFinite(qiValue)) {
+    showToast('Enter a valid positive Qi value', 'warning');
+    return;
+  }
+
+  const isDate = w.is_date || false;
+  let tAnchor = 0;  /* default: set at t=0 */
+
+  if (isDate && dateInput && dateInput.value) {
+    /* Parse date from input (input type=date gives YYYY-MM-DD) */
+    const parts = dateInput.value.split('-');
+    if (parts.length === 3) {
+      const ts = new Date(+parts[0], +parts[1] - 1, +parts[2]).getTime();
+      tAnchor = xToT(w, ts);
+    }
+  } else if (!isDate && dateInput && dateInput.value) {
+    const numX = parseFloat(dateInput.value);
+    if (isFinite(numX)) {
+      tAnchor = xToT(w, numX);
+    }
+  }
+
+  applyQiAtT(cardId, tAnchor, qiValue);
+  showToast(`Qi applied: ${qiValue.toFixed(2)} at ${dateInput ? dateInput.value || 'start' : 'start'}`, 'info', 3000);
+}
+
+
 /* --- Context Menu Actions --- */
 
 document.querySelectorAll('#chartCtxMenu > .ccm-item[data-action]').forEach(item => {
@@ -5375,6 +5668,8 @@ document.querySelectorAll('#chartCtxMenu > .ccm-item[data-action]').forEach(item
     else if (action === 'log-scale') toggleLogScale(_ctxMenuCardId);
 
     else if (action === 'log-scale-x') toggleLogScaleX(_ctxMenuCardId);
+
+    else if (action === 'set-qi') setQiAtPoint(_ctxMenuCardId);
 
     hideChartCtxMenu();
 
@@ -6302,21 +6597,21 @@ let _fcFnSearch = '';
 
 // ── Function catalogue organised by category ──
 const FC_FUNCTIONS = {
-  Math:        ['ABS','ROUND','SQRT','LOG','LOG10','POW','MOD','CEIL','FLOOR','EXP'],
-  Statistical: ['SUM','AVG','MIN','MAX','STD','VAR','MEDIAN','COUNT'],
-  Logical:     ['IF','AND','OR','NOT','ISNULL','FILLNA'],
+  Math: ['ABS', 'ROUND', 'SQRT', 'LOG', 'LOG10', 'POW', 'MOD', 'CEIL', 'FLOOR', 'EXP'],
+  Statistical: ['SUM', 'AVG', 'MIN', 'MAX', 'STD', 'VAR', 'MEDIAN', 'COUNT'],
+  Logical: ['IF', 'AND', 'OR', 'NOT', 'ISNULL', 'FILLNA'],
 };
 const FC_ALL_FNS = Object.values(FC_FUNCTIONS).flat();
 const FC_FN_DESCRIPTIONS = {
-  ABS:'Absolute value', ROUND:'Round to N digits', SQRT:'Square root',
-  LOG:'Natural logarithm', LOG10:'Base-10 log', POW:'Raise to power',
-  MOD:'Modulo / remainder', CEIL:'Round up', FLOOR:'Round down', EXP:'e^x',
-  SUM:'Sum of column', AVG:'Average / mean', MIN:'Minimum value',
-  MAX:'Maximum value', STD:'Standard deviation', VAR:'Variance',
-  MEDIAN:'Median value', COUNT:'Count non-null',
-  IF:'Conditional: IF(cond, then, else)', AND:'Logical AND',
-  OR:'Logical OR', NOT:'Logical NOT', ISNULL:'Check for null',
-  FILLNA:'Replace null with value',
+  ABS: 'Absolute value', ROUND: 'Round to N digits', SQRT: 'Square root',
+  LOG: 'Natural logarithm', LOG10: 'Base-10 log', POW: 'Raise to power',
+  MOD: 'Modulo / remainder', CEIL: 'Round up', FLOOR: 'Round down', EXP: 'e^x',
+  SUM: 'Sum of column', AVG: 'Average / mean', MIN: 'Minimum value',
+  MAX: 'Maximum value', STD: 'Standard deviation', VAR: 'Variance',
+  MEDIAN: 'Median value', COUNT: 'Count non-null',
+  IF: 'Conditional: IF(cond, then, else)', AND: 'Logical AND',
+  OR: 'Logical OR', NOT: 'Logical NOT', ISNULL: 'Check for null',
+  FILLNA: 'Replace null with value',
 };
 
 /* ── Open the Composer ── */
@@ -6457,7 +6752,7 @@ function showFormulaBuilder(editFormula, editName) {
 function fcSwitchTab(tab) {
   document.querySelectorAll('.fc-ptab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.getElementById('fcTabCols').style.display = tab === 'cols' ? '' : 'none';
-  document.getElementById('fcTabFns').style.display  = tab === 'fns'  ? '' : 'none';
+  document.getElementById('fcTabFns').style.display = tab === 'fns' ? '' : 'none';
 }
 
 /* ── Column / function search ── */
@@ -6544,7 +6839,7 @@ function fcShowAc() {
   el.innerHTML = _fcAutoComplete.map((s, i) => {
     const active = i === _fcAcIndex ? ' fc-ac-active' : '';
     const icon = s.type === 'col' ? '<span class="fc-ac-icon col">⊞</span>'
-                                  : '<span class="fc-ac-icon fn">ƒ</span>';
+      : '<span class="fc-ac-icon fn">ƒ</span>';
     return `<div class="fc-ac-item${active}" data-i="${i}"
               onmousedown="fcPickAc(${i})">${icon}<span>${s.label}</span></div>`;
   }).join('');
@@ -6573,7 +6868,7 @@ function fcOnKeydown(e) {
   // Autocomplete navigation
   if (_fcAutoComplete.length > 0) {
     if (e.key === 'ArrowDown') { e.preventDefault(); _fcAcIndex = Math.min(_fcAcIndex + 1, _fcAutoComplete.length - 1); fcShowAc(); return; }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); _fcAcIndex = Math.max(_fcAcIndex - 1, 0); fcShowAc(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); _fcAcIndex = Math.max(_fcAcIndex - 1, 0); fcShowAc(); return; }
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); fcPickAc(_fcAcIndex); return; }
     if (e.key === 'Escape') { fcHideAc(); return; }
   }
@@ -6591,7 +6886,7 @@ function fcOnKeydown(e) {
     if (val) {
       if (!isNaN(val) && val !== '') {
         _fcParts.push({ type: 'num', value: val });
-      } else if (['+','-','*','/','**','(',')'].includes(val)) {
+      } else if (['+', '-', '*', '/', '**', '(', ')'].includes(val)) {
         _fcParts.push({ type: 'op', value: val });
       } else {
         const match = uploadedColumns.find(c => c.toLowerCase() === val.toLowerCase());
@@ -6609,10 +6904,10 @@ function fcOnKeydown(e) {
 /* ── Render tokens + raw formula + trigger live preview ── */
 function fcRender() {
   const tokensEl = document.getElementById('fcTokens');
-  const rawEl    = document.getElementById('fcFormulaRaw');
+  const rawEl = document.getElementById('fcFormulaRaw');
   if (!tokensEl) return;
 
-  const displayMap = { '+':'+', '-':'−', '*':'×', '/':'÷', '**':'^' };
+  const displayMap = { '+': '+', '-': '−', '*': '×', '/': '÷', '**': '^' };
 
   let html = '';
   _fcParts.forEach((p, i) => {
@@ -6639,7 +6934,7 @@ function fcRender() {
 function fcBuildFormulaDisplay() {
   return _fcParts.map(p => {
     if (p.type === 'col') return `[${p.value}]`;
-    if (p.type === 'fn')  return p.value;
+    if (p.type === 'fn') return p.value;
     return p.value;
   }).join(' ');
 }
@@ -6649,7 +6944,7 @@ function fcBuildFormulaBackend() {
   let i = 0;
   while (i < _fcParts.length) {
     const p = _fcParts[i];
-    if (p.type === 'fn' && ['SUM','AVG','MIN','MAX','STD','VAR','MEDIAN','COUNT'].includes(p.value)) {
+    if (p.type === 'fn' && ['SUM', 'AVG', 'MIN', 'MAX', 'STD', 'VAR', 'MEDIAN', 'COUNT'].includes(p.value)) {
       const fn = p.value;
       let j = i + 1;
       while (j < _fcParts.length && _fcParts[j].value !== '(') j++;
@@ -6662,16 +6957,18 @@ function fcBuildFormulaBackend() {
         j++;
       }
       const colExpr = inner.map(ip => ip.type === 'col' ? '`' + ip.value + '`' : ip.value).join(' ');
-      const aggMap = { SUM:'sum', AVG:'mean', MIN:'min', MAX:'max', STD:'std', VAR:'var', MEDIAN:'median', COUNT:'count' };
+      const aggMap = { SUM: 'sum', AVG: 'mean', MIN: 'min', MAX: 'max', STD: 'std', VAR: 'var', MEDIAN: 'median', COUNT: 'count' };
       parts.push(`${colExpr}.${aggMap[fn]}()`);
       i = j + 1;
       continue;
     }
     if (p.type === 'col') parts.push('`' + p.value + '`');
     else if (p.type === 'fn') {
-      const m = { ABS:'abs', ROUND:'round', SQRT:'sqrt', LOG:'log', LOG10:'log10', POW:'pow',
-                  MOD:'mod', CEIL:'ceil', FLOOR:'floor', EXP:'exp',
-                  IF:'where', AND:'and', OR:'or', NOT:'not', ISNULL:'isnull', FILLNA:'fillna' };
+      const m = {
+        ABS: 'abs', ROUND: 'round', SQRT: 'sqrt', LOG: 'log', LOG10: 'log10', POW: 'pow',
+        MOD: 'mod', CEIL: 'ceil', FLOOR: 'floor', EXP: 'exp',
+        IF: 'where', AND: 'and', OR: 'or', NOT: 'not', ISNULL: 'isnull', FILLNA: 'fillna'
+      };
       parts.push((m[p.value] || p.value.toLowerCase()));
     }
     else parts.push(p.value);
@@ -6687,8 +6984,8 @@ function fcSchedulePreview() {
 }
 
 async function fcRunPreview() {
-  const body   = document.getElementById('fcLiveBody');
-  const badge  = document.getElementById('fcLiveStatus');
+  const body = document.getElementById('fcLiveBody');
+  const badge = document.getElementById('fcLiveStatus');
   const errDiv = document.getElementById('fcError');
   if (!body) return;
 
@@ -6736,9 +7033,9 @@ async function fcRunPreview() {
 
 /* ── Save column ── */
 async function fcSave() {
-  const name    = document.getElementById('fcColName')?.value.trim();
+  const name = document.getElementById('fcColName')?.value.trim();
   const formula = fcBuildFormulaBackend();
-  const errDiv  = document.getElementById('fcError');
+  const errDiv = document.getElementById('fcError');
 
   if (!name) { _fcShowErr(errDiv, 'Please enter a column name.'); document.getElementById('fcColName')?.focus(); return; }
   if (!formula) { _fcShowErr(errDiv, 'Build a formula first.'); return; }
@@ -6755,7 +7052,7 @@ async function fcSave() {
     if (!res.ok) throw new Error(data.detail || 'Error');
 
     uploadedColumns = data.columns;
-    numericColumns  = data.numeric_columns;
+    numericColumns = data.numeric_columns;
     derivedColumnNames = (data.derived_columns || []).map(d => d.name || d);
     populateSelectors();
     previewState.columns = data.columns;
@@ -6783,10 +7080,12 @@ function fcParseExisting(formula) {
   tokens.forEach(t => {
     if (t.startsWith('`') && t.endsWith('`')) _fcParts.push({ type: 'col', value: t.slice(1, -1) });
     else if (t.endsWith('()')) {
-      const m = { 'sum()':'SUM','mean()':'AVG','min()':'MIN','max()':'MAX','abs()':'ABS','sqrt()':'SQRT',
-                  'std()':'STD','var()':'VAR','median()':'MEDIAN','count()':'COUNT' };
-      _fcParts.push({ type: 'fn', value: m[t.toLowerCase()] || t.slice(0,-2).toUpperCase() });
-    } else if (['+','-','*','/','**','(',')'].includes(t)) _fcParts.push({ type: 'op', value: t });
+      const m = {
+        'sum()': 'SUM', 'mean()': 'AVG', 'min()': 'MIN', 'max()': 'MAX', 'abs()': 'ABS', 'sqrt()': 'SQRT',
+        'std()': 'STD', 'var()': 'VAR', 'median()': 'MEDIAN', 'count()': 'COUNT'
+      };
+      _fcParts.push({ type: 'fn', value: m[t.toLowerCase()] || t.slice(0, -2).toUpperCase() });
+    } else if (['+', '-', '*', '/', '**', '(', ')'].includes(t)) _fcParts.push({ type: 'op', value: t });
     else if (!isNaN(t)) _fcParts.push({ type: 'num', value: t });
     else _fcParts.push({ type: 'text', value: t });
   });
@@ -6795,7 +7094,7 @@ function fcParseExisting(formula) {
 
 // Backward-compat aliases
 function showAddColumnModal() { showFormulaBuilder(); }
-async function doAddColumn()  { fcSave(); }
+async function doAddColumn() { fcSave(); }
 
 
 /* ── Calculated Columns Panel ── */
@@ -7074,7 +7373,7 @@ async function loadWorkspaceFromFile() {
             const res = await fetch(`/api/wells?well_col=${encodeURIComponent(cardSelWellCol)}`);
             const data = await res.json();
             allWells = data.wells || [];
-          } catch(e) { allWells = []; }
+          } catch (e) { allWells = []; }
         }
 
         const newId = addPlotCard(cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, '', cs.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol);
@@ -8444,7 +8743,7 @@ function filterTable(cardId) {
 
   const wellEl = document.getElementById('dtFilterWell-' + cardId);
 
-  const secEl  = document.getElementById('dtFilterSection-' + cardId);
+  const secEl = document.getElementById('dtFilterSection-' + cardId);
 
   cardTableFilter[cardId] = {
 
@@ -8462,11 +8761,11 @@ function clearTableFilter(cardId) {
 
   const wellEl = document.getElementById('dtFilterWell-' + cardId);
 
-  const secEl  = document.getElementById('dtFilterSection-' + cardId);
+  const secEl = document.getElementById('dtFilterSection-' + cardId);
 
   if (wellEl) wellEl.value = '';
 
-  if (secEl)  secEl.value  = '';
+  if (secEl) secEl.value = '';
 
   cardTableFilter[cardId] = { well: '', section: '' };
 
@@ -9113,7 +9412,7 @@ async function loadWorkspace() {
           const res = await fetch(`/api/wells?well_col=${encodeURIComponent(cardSelWellCol)}`);
           const data = await res.json();
           allWells = data.wells || [];
-        } catch(e) { allWells = state.allWells || []; }
+        } catch (e) { allWells = state.allWells || []; }
       } else {
         allWells = state.allWells || [];
       }

@@ -979,6 +979,65 @@ button.btn-sm {
   font-variant-numeric: tabular-nums;
 }
 
+/* Qi Input Panel */
+.qi-input-panel {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qi-input-label {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.qi-input-field {
+  padding: 4px 8px;
+  font-size: .82rem;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: 4px;
+  width: 90px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qi-input-field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.qi-date-field {
+  width: 130px;
+}
+
+.qi-input-btn {
+  padding: 4px 14px;
+  font-size: .78rem;
+  font-weight: 600;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all .15s ease;
+  white-space: nowrap;
+}
+
+.qi-input-btn:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+}
+
 .add-plot-btn {
   border: 2px dashed var(--border);
   border-radius: var(--radius);
