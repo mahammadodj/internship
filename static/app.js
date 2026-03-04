@@ -145,6 +145,9 @@ let _ctxMenuClientY = 0;
 let _anchorMenuCardId = null;
 let _anchorMenuIdx = null;
 let _anchorMenuJustOpened = false; // prevents doc-click from closing on same tick
+let _pointMenuCardId = null;
+let _pointMenuIdx = null;
+let _pointMenuJustOpened = false;
 
 
 
@@ -2313,6 +2316,18 @@ async function runSingleDCA(cardId) {
 
   btn.disabled = true;
 
+  /* Save existing Qi anchor (x-display, y) pairs so they can be re-inserted
+     into the fresh server data after the DCA fetch completes. */
+  const savedAnchors = [];
+  const prevWell = cardLastData[cardId]?.wells?.[0];
+  if (prevWell && prevWell.qi_anchor_indices && prevWell.qi_anchor_indices.length > 0) {
+    for (const i of prevWell.qi_anchor_indices) {
+      if (i < prevWell.x.length) {
+        savedAnchors.push({ x: prevWell.x[i], y: prevWell.y_actual[i] });
+      }
+    }
+  }
+
   const excl = cardExclusions[cardId] || new Set();
 
   const exclStr = [...excl].join(',');
@@ -2331,7 +2346,45 @@ async function runSingleDCA(cardId) {
 
     cardStyles[cardId] = readCardStyles(cardId);
 
-    renderSingleChart(cardId, data, months);
+    /* Re-insert saved Qi anchor points into fresh data, then refit */
+    if (savedAnchors.length > 0 && data.wells && data.wells.length === 1) {
+      const w = data.wells[0];
+      const isDate = w.is_date || false;
+
+      for (const anchor of savedAnchors) {
+        const xCoord = isDate ? parseDateStr(anchor.x) : anchor.x;
+        const tNew = xToT(w, xCoord);
+
+        /* Insert in sorted t order */
+        let insertIdx = w.t.length;
+        for (let i = 0; i < w.t.length; i++) {
+          if (tNew < w.t[i]) { insertIdx = i; break; }
+        }
+        w.t.splice(insertIdx, 0, tNew);
+        w.y_actual.splice(insertIdx, 0, anchor.y);
+        w.x.splice(insertIdx, 0, anchor.x);
+        if (w.y_fitted) w.y_fitted.splice(insertIdx, 0, null);
+
+        /* Shift exclusion indices */
+        const curExcl = cardExclusions[cardId] || new Set();
+        const shiftedExcl = new Set();
+        for (const idx of curExcl) { shiftedExcl.add(idx >= insertIdx ? idx + 1 : idx); }
+        cardExclusions[cardId] = shiftedExcl;
+        w.excluded_indices = [...shiftedExcl].sort((a, b) => a - b);
+
+        /* Shift and record anchor indices */
+        const anchorSet = new Set();
+        for (const idx of (w.qi_anchor_indices || [])) {
+          anchorSet.add(idx >= insertIdx ? idx + 1 : idx);
+        }
+        anchorSet.add(insertIdx);
+        w.qi_anchor_indices = [...anchorSet];
+      }
+
+      await refitCurrentData(cardId);
+    } else {
+      renderSingleChart(cardId, data, months);
+    }
 
   } catch (err) { alert(err.message); }
 
@@ -4775,7 +4828,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       idx = params.data && params.data[2];
 
-      if (idx !== undefined && idx !== null) toggleExclusion(cardId, idx);
+      if (idx !== undefined && idx !== null) {
+        const nativeEvt = params.event && params.event.event;
+        if (nativeEvt) nativeEvt.stopPropagation();
+        const ex = nativeEvt ? nativeEvt.clientX : (params.event ? params.event.clientX || 300 : 300);
+        const ey = nativeEvt ? nativeEvt.clientY : (params.event ? params.event.clientY || 200 : 200);
+        showPointMenu(cardId, idx, ex, ey);
+      }
 
     });
 
@@ -5608,6 +5667,54 @@ async function anchorRemovePoint() {
   const removeBtn = document.getElementById('anchorRemoveBtn');
   if (exclBtn)   exclBtn.addEventListener('click',   anchorToggleExclude);
   if (removeBtn) removeBtn.addEventListener('click',  anchorRemovePoint);
+})();
+
+/* ---- Regular data-point popup menu ---- */
+
+function showPointMenu(cardId, idx, clientX, clientY) {
+  _pointMenuCardId = cardId;
+  _pointMenuIdx = idx;
+  _pointMenuJustOpened = true;
+  setTimeout(() => { _pointMenuJustOpened = false; }, 50);
+
+  const excl = cardExclusions[cardId] || new Set();
+  const label = document.getElementById('pointMenuExclLabel');
+  if (label) label.textContent = excl.has(idx) ? 'Include in fitting' : 'Exclude from fitting';
+
+  const menu = document.getElementById('pointMenu');
+  menu.style.left = clientX + 'px';
+  menu.style.top  = clientY + 'px';
+  menu.style.display = 'block';
+
+  requestAnimationFrame(() => {
+    const mr = menu.getBoundingClientRect();
+    if (mr.right  > window.innerWidth)  menu.style.left = (clientX - mr.width)  + 'px';
+    if (mr.bottom > window.innerHeight) menu.style.top  = (clientY - mr.height) + 'px';
+  });
+}
+
+function hidePointMenu() {
+  const m = document.getElementById('pointMenu');
+  if (m) m.style.display = 'none';
+}
+
+document.addEventListener('click', function (e) {
+  if (_pointMenuJustOpened) return;
+  if (!e.target.closest('#pointMenu')) hidePointMenu();
+});
+
+function pointMenuToggleExclude() {
+  const cardId = _pointMenuCardId, idx = _pointMenuIdx;
+  hidePointMenu();
+  if (cardId == null || idx == null) return;
+  saveZoomState(cardId);
+  toggleExclusion(cardId, idx);
+}
+
+/* Wire up point menu button */
+(function () {
+  const btn = document.getElementById('pointMenuExclBtn');
+  if (btn) btn.addEventListener('click', pointMenuToggleExclude);
 })();
 
 /* --- Set Qi at any point --- */
