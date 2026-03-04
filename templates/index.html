@@ -364,7 +364,14 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=4"></script>
+  <!-- Anchor Point Popup Menu -->
+  <div class="custom-context-menu" id="anchorPointMenu" style="display:none;min-width:190px;">
+    <div class="ccm-item" id="anchorExclBtn"><span class="ccm-icon">⊘</span> <span id="anchorExclLabel">Exclude from fitting</span></div>
+    <div class="ccm-divider"></div>
+    <div class="ccm-item" id="anchorRemoveBtn" style="color:var(--red);"><span class="ccm-icon">✕</span> Remove data point</div>
+  </div>
+
+  <script src="/static/app.js?v=6"></script>
 </body>
 
 </html>

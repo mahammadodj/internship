@@ -68,6 +68,7 @@ def _save_active_meta():
         "last_import_timestamp": _last_import_timestamp,
         "file_disk_path": _file_disk_path,
         "active_version": _active_version,
+        "derived_columns": _derived_columns,
     }
     try:
         _META_FILE.write_text(json.dumps(meta, indent=2))
@@ -80,7 +81,7 @@ def _load_active_dataset_on_startup():
     global _current_df, _current_filename, _date_columns
     global _current_file_bytes, _current_file_suffix, _file_disk_path
     global _active_dataset_id, _last_import_timestamp, _file_last_modified
-    global _active_version
+    global _active_version, _derived_columns
 
     if not _META_FILE.exists():
         return
@@ -130,6 +131,11 @@ def _load_active_dataset_on_startup():
             _file_last_modified = Path(_file_disk_path).stat().st_mtime
         else:
             _file_last_modified = 0
+
+        # Restore derived column formulas from meta
+        saved_derived = meta.get("derived_columns", {})
+        if saved_derived:
+            _derived_columns.update(saved_derived)
 
         # Rebuild _datasets registry entry
         _datasets[ds_id] = {
@@ -915,6 +921,67 @@ async def decline_curve_analysis(
         "model": model,
         "wells": result,
     }
+
+
+# ---------------------------------------------------------------------------
+# Inline re-fit endpoint (used when user adds an anchor point client-side)
+# ---------------------------------------------------------------------------
+class FitInlineRequest(BaseModel):
+    t: list[float]
+    y: list[float]
+    model: str
+    forecast_months: float = 0.0
+
+
+@app.post("/api/fit_inline")
+async def fit_inline(req: FitInlineRequest):
+    """Re-fit a decline model to caller-supplied (t, y) arrays.
+
+    Returns fitted params, fitted y values, equation string, and optional
+    forecast arrays – everything the front-end needs to refresh a chart
+    without a full /api/dca round-trip.
+    """
+    if req.model not in _MODELS:
+        raise HTTPException(status_code=400, detail=f"Unknown model '{req.model}'.")
+    t_arr = np.array(req.t, dtype=float)
+    y_arr = np.array(req.y, dtype=float)
+    if len(t_arr) < 3 or len(t_arr) != len(y_arr):
+        raise HTTPException(status_code=400, detail="Need at least 3 matching t/y values.")
+
+    params = _fit_decline(t_arr, y_arr, req.model)
+    if not params:
+        raise HTTPException(status_code=422, detail="Curve fitting failed.")
+
+    func = _MODELS[req.model][0]
+    param_names = _MODELS[req.model][1]
+    eq_fmt = _MODELS[req.model][4]
+
+    p_vals = [params[n] for n in param_names]
+    fitted = func(t_arr, *p_vals)
+    fitted = np.nan_to_num(fitted, nan=0.0, posinf=0.0, neginf=0.0)
+
+    try:
+        equation = eq_fmt.format(**params)
+    except Exception:
+        equation = ""
+
+    result: dict = {
+        "params": params,
+        "y_fitted": fitted.tolist(),
+        "equation": equation,
+    }
+
+    # Forecast
+    if req.forecast_months and req.forecast_months > 0:
+        last_t = float(t_arr[-1])
+        n_months = int(req.forecast_months)
+        t_forecast = np.array([last_t + 30.4375 * (i + 1) for i in range(n_months)])
+        q_forecast = func(t_forecast, *p_vals)
+        q_forecast = np.nan_to_num(q_forecast, nan=0.0, posinf=0.0, neginf=0.0)
+        result["forecast_t"] = t_forecast.tolist()
+        result["forecast_y"] = q_forecast.tolist()
+
+    return result
 
 
 # ---------------------------------------------------------------------------

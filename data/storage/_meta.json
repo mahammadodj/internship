@@ -6,5 +6,8 @@
   ],
   "last_import_timestamp": "2026-03-03T12:38:41.251858+00:00",
   "file_disk_path": "C:\\Users\\MahammadOjagzada\\OneDrive - EiGroup\\Desktop\\Private\\internship\\Decline-Curve-Analysis-web-application\\rates.csv",
-  "active_version": 1
+  "active_version": 1,
+  "derived_columns": {
+    "2c9e793f1209": []
+  }
 }

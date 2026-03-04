@@ -142,6 +142,9 @@ let _ctxMenuCardId = null;
 let _ctxMenuCoord = null;
 let _ctxMenuClientX = 0;
 let _ctxMenuClientY = 0;
+let _anchorMenuCardId = null;
+let _anchorMenuIdx = null;
+let _anchorMenuJustOpened = false; // prevents doc-click from closing on same tick
 
 
 
@@ -2340,6 +2343,10 @@ async function runSingleDCA(cardId) {
 
 function toggleExclusion(cardId, index) {
 
+  const _w0 = cardLastData[cardId]?.wells?.[0];
+  /* Qi anchor points are immune — clicking them does nothing */
+  if (_w0 && (_w0.qi_anchor_indices || []).includes(index)) return;
+
   if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
 
   const s = cardExclusions[cardId];
@@ -2348,7 +2355,11 @@ function toggleExclusion(cardId, index) {
 
   saveZoomState(cardId);
 
-  runSingleDCA(cardId);
+  if (_w0 && _w0.qi_anchor_indices && _w0.qi_anchor_indices.length > 0) {
+    refitCurrentData(cardId);
+  } else {
+    runSingleDCA(cardId);
+  }
 
 }
 
@@ -4294,7 +4305,9 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     if (isDate) {
 
-      const incD = [], exclD = [];
+      const anchorSet = new Set(w.qi_anchor_indices || []);
+
+      const incD = [], exclD = [], anchorD = [];
 
       for (let i = 0; i < actualLen; i++) {
 
@@ -4304,6 +4317,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         if (isSingle && excluded.has(i)) exclD.push(pt);
 
+        else if (isSingle && anchorSet.has(i)) anchorD.push(pt);
+
         else incD.push(pt);
 
       }
@@ -4311,6 +4326,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
       series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: incD });
 
       if (isSingle && excluded.size > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+
+      if (isSingle && anchorD.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD, z: 10 });
 
       if (w.y_fitted) {
 
@@ -4359,13 +4376,17 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     } else {
 
-      const incD = [], exclD = [];
+      const anchorSet2 = new Set(w.qi_anchor_indices || []);
 
-      for (let i = 0; i < actualLen; i++) { const pt = [w.x[i], w.y_actual[i], i]; if (isSingle && excluded.has(i)) exclD.push(pt); else incD.push(pt); }
+      const incD = [], exclD = [], anchorD2 = [];
+
+      for (let i = 0; i < actualLen; i++) { const pt = [w.x[i], w.y_actual[i], i]; if (isSingle && excluded.has(i)) exclD.push(pt); else if (isSingle && anchorSet2.has(i)) anchorD2.push(pt); else incD.push(pt); }
 
       series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: incD });
 
       if (isSingle && excluded.size > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+
+      if (isSingle && anchorD2.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD2, z: 10 });
 
       if (w.y_fitted) {
         series.push({
@@ -4730,6 +4751,22 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         return;
 
+      }
+
+      /* Qi anchor click → show anchor popup menu */
+      if (params.seriesName === 'Qi Anchor') {
+        const idx = params.data && params.data[2];
+        if (idx !== undefined && idx !== null) {
+          /* Stop the native click from bubbling to document (which would
+             immediately trigger hideAnchorPointMenu). */
+          const nativeEvt = params.event && params.event.event;
+          if (nativeEvt) nativeEvt.stopPropagation();
+          /* Use viewport-relative coordinates (position:fixed menu needs clientX/Y) */
+          const ex = nativeEvt ? nativeEvt.clientX : (params.event ? params.event.clientX || 300 : 300);
+          const ey = nativeEvt ? nativeEvt.clientY : (params.event ? params.event.clientY || 200 : 200);
+          showAnchorPointMenu(cardId, idx, ex, ey);
+        }
+        return;
       }
 
       if (!params.seriesName.endsWith('Actual') && params.seriesName !== 'Excluded') return;
@@ -5151,9 +5188,13 @@ function fitSelectionOnly(cardId, chart, selRect) {
 
 
 
+  const _anchorsFSO = new Set(w.qi_anchor_indices || []);
+
   const newExcl = new Set();
 
   for (let i = 0; i < w.x.length; i++) {
+
+    if (_anchorsFSO.has(i)) continue; // Qi anchor points are never excluded
 
     let xVal, yVal = w.y_actual[i];
 
@@ -5171,7 +5212,11 @@ function fitSelectionOnly(cardId, chart, selRect) {
 
   saveZoomState(cardId);
 
-  runSingleDCA(cardId);
+  if (w.qi_anchor_indices && w.qi_anchor_indices.length > 0) {
+    refitCurrentData(cardId);
+  } else {
+    runSingleDCA(cardId);
+  }
 
 }
 
@@ -5222,10 +5267,11 @@ function excludeSelection(cardId, chart, selRect) {
   if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
 
   const existing = cardExclusions[cardId];
-
-
+  const _anchorsES = new Set(w.qi_anchor_indices || []);
 
   for (let i = 0; i < w.x.length; i++) {
+
+    if (_anchorsES.has(i)) continue; // Qi anchor points are never excluded
 
     let xVal, yVal = w.y_actual[i];
 
@@ -5241,7 +5287,11 @@ function excludeSelection(cardId, chart, selRect) {
 
   saveZoomState(cardId);
 
-  runSingleDCA(cardId);
+  if (w.qi_anchor_indices && w.qi_anchor_indices.length > 0) {
+    refitCurrentData(cardId);
+  } else {
+    runSingleDCA(cardId);
+  }
 
 }
 
@@ -5457,7 +5507,108 @@ document.addEventListener('click', function (e) {
 
 });
 
+/* ====================================================================
+   Anchor Point Popup Menu
+   ==================================================================== */
 
+function showAnchorPointMenu(cardId, idx, clientX, clientY) {
+  _anchorMenuCardId = cardId;
+  _anchorMenuIdx = idx;
+  _anchorMenuJustOpened = true;
+  setTimeout(() => { _anchorMenuJustOpened = false; }, 50);
+
+  const excl = cardExclusions[cardId] || new Set();
+  const label = document.getElementById('anchorExclLabel');
+  if (label) label.textContent = excl.has(idx) ? 'Include in fitting' : 'Exclude from fitting';
+
+  const menu = document.getElementById('anchorPointMenu');
+  menu.style.left = clientX + 'px';
+  menu.style.top  = clientY + 'px';
+  menu.style.display = 'block';
+
+  requestAnimationFrame(() => {
+    const mr = menu.getBoundingClientRect();
+    if (mr.right  > window.innerWidth)  menu.style.left = (clientX - mr.width)  + 'px';
+    if (mr.bottom > window.innerHeight) menu.style.top  = (clientY - mr.height) + 'px';
+  });
+}
+
+function hideAnchorPointMenu() {
+  const m = document.getElementById('anchorPointMenu');
+  if (m) m.style.display = 'none';
+}
+
+document.addEventListener('click', function (e) {
+  if (_anchorMenuJustOpened) return;
+  if (!e.target.closest('#anchorPointMenu')) hideAnchorPointMenu();
+});
+
+/* Toggle a Qi anchor point in/out of the exclusion set (it stays visible on the chart) */
+function anchorToggleExclude() {
+  const cardId = _anchorMenuCardId, idx = _anchorMenuIdx;
+  hideAnchorPointMenu();
+  if (cardId == null || idx == null) return;
+
+  if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
+  const s = cardExclusions[cardId];
+  if (s.has(idx)) s.delete(idx); else s.add(idx);
+
+  saveZoomState(cardId);
+  refitCurrentData(cardId);
+}
+
+/* Remove a Qi anchor data point from the well arrays entirely */
+async function anchorRemovePoint() {
+  const cardId = _anchorMenuCardId, idx = _anchorMenuIdx;
+  hideAnchorPointMenu();
+  if (cardId == null || idx == null) return;
+
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || !data.wells[0]) return;
+  const w = data.wells[0];
+
+  /* 1. Remove from all data arrays */
+  w.t.splice(idx, 1);
+  w.x.splice(idx, 1);
+  w.y_actual.splice(idx, 1);
+  if (w.y_fitted) w.y_fitted.splice(idx, 1);
+
+  /* 2. Update exclusions: remove idx, shift higher indices down by 1 */
+  const excl = cardExclusions[cardId] || new Set();
+  const newExcl = new Set();
+  for (const i of excl) {
+    if (i === idx) continue;
+    newExcl.add(i > idx ? i - 1 : i);
+  }
+  cardExclusions[cardId] = newExcl;
+  w.excluded_indices = [...newExcl].sort((a, b) => a - b);
+
+  /* 3. Update anchor indices: remove idx, shift higher down by 1 */
+  const newAnchors = [];
+  for (const i of (w.qi_anchor_indices || [])) {
+    if (i === idx) continue;
+    newAnchors.push(i > idx ? i - 1 : i);
+  }
+  w.qi_anchor_indices = newAnchors;
+
+  saveZoomState(cardId);
+
+  if (newAnchors.length > 0) {
+    /* Still have anchors — use in-memory refit */
+    await refitCurrentData(cardId);
+  } else {
+    /* No more anchors — normal server-side DCA */
+    runSingleDCA(cardId);
+  }
+}
+
+/* Wire up anchor menu buttons (script runs after DOM, no need for DOMContentLoaded) */
+(function () {
+  const exclBtn   = document.getElementById('anchorExclBtn');
+  const removeBtn = document.getElementById('anchorRemoveBtn');
+  if (exclBtn)   exclBtn.addEventListener('click',   anchorToggleExclude);
+  if (removeBtn) removeBtn.addEventListener('click',  anchorRemovePoint);
+})();
 
 /* --- Set Qi at any point --- */
 
@@ -5465,25 +5616,11 @@ document.addEventListener('click', function (e) {
 function xToT(w, xVal) {
   const isDate = w.is_date || false;
   if (isDate) {
-    /* Find the closest data point by date, use its t value, or interpolate */
-    let bestIdx = 0, bestDiff = Infinity;
-    for (let i = 0; i < w.x.length; i++) {
-      const ts = parseDateStr(w.x[i]);
-      const d = Math.abs(ts - xVal);
-      if (d < bestDiff) { bestDiff = d; bestIdx = i; }
-    }
-    /* Also check forecast dates */
-    if (w.forecast && w.forecast.x) {
-      for (let i = 0; i < w.forecast.x.length; i++) {
-        const ts = parseDateStr(w.forecast.x[i]);
-        const d = Math.abs(ts - xVal);
-        if (d < bestDiff) {
-          bestDiff = d;
-          if (w.forecast.t) return w.forecast.t[i];
-        }
-      }
-    }
-    return w.t[bestIdx];
+    /* Calculate t directly from date difference rather than snapping to the
+       nearest existing data point.  t is in days from the first date (t[0]=0). */
+    const MS_PER_DAY = 86400000;
+    const firstDateMs = parseDateStr(w.x[0]);
+    return (xVal - firstDateMs) / MS_PER_DAY + (w.t[0] || 0);
   } else {
     /* Numeric axis: t ≈ xVal - x[0] + t[0] */
     if (w.t.length === 0) return 0;
@@ -5491,9 +5628,10 @@ function xToT(w, xVal) {
   }
 }
 
-/* Core logic: apply a new Qi anchored at a specific t value, so that q(t_anchor) = qiValue.
-   Solves for actual qi at t=0: qi_t0 = qiValue / f(t_anchor) where f uses qi=1 */
-function applyQiAtT(cardId, tAnchor, qiValue) {
+/* Core logic: add (xClick, yClick) as a new data point, then re-fit the
+   decline model to ALL data (including the new point) via /api/fit_inline.
+   The old applyQiAtT that only tweaked qi is replaced by a true re-fit. */
+async function addPointAndRefit(cardId, tNew, yNew, xDisplayNew) {
   const data = cardLastData[cardId];
   if (!data || !data.wells || data.wells.length !== 1) return;
   const w = data.wells[0];
@@ -5502,75 +5640,213 @@ function applyQiAtT(cardId, tAnchor, qiValue) {
   const model = data.model || 'exponential';
   const isDate = w.is_date || false;
 
-  /* Solve for qi at t=0 such that q(tAnchor) = qiValue */
-  let qi_t0;
-  if (tAnchor <= 0) {
-    qi_t0 = qiValue;  /* At t=0, qi_t0 = qiValue */
-  } else {
-    /* f(t) = evalDeclineModel with qi=1 gives the decay factor */
-    const decayFactor = evalDeclineModel(model, tAnchor, { qi: 1, di: w.params.di, b: w.params.b });
-    if (!decayFactor || decayFactor <= 0) {
-      qi_t0 = qiValue;
-    } else {
-      qi_t0 = qiValue / decayFactor;
-    }
-  }
-
-  w.params.qi = Math.round(qi_t0 * 1e6) / 1e6;
-
-  /* Recalculate fitted values */
+  /* ---- 1. Insert the new point into the well data arrays in sorted order ---- */
+  let insertIdx = w.t.length; // default: append at end
   for (let i = 0; i < w.t.length; i++) {
-    if (w.y_fitted[i] != null) w.y_fitted[i] = evalDeclineModel(model, w.t[i], w.params);
+    if (tNew < w.t[i]) { insertIdx = i; break; }
   }
 
-  /* Recalculate forecast values */
-  if (w.forecast && w.forecast.t) {
-    for (let i = 0; i < w.forecast.t.length; i++) {
-      w.forecast.y[i] = evalDeclineModel(model, w.forecast.t[i], w.params);
+  w.t.splice(insertIdx, 0, tNew);
+  w.y_actual.splice(insertIdx, 0, yNew);
+  w.x.splice(insertIdx, 0, xDisplayNew);
+  // y_fitted will be rebuilt after fitting
+  w.y_fitted.splice(insertIdx, 0, null);
+
+  /* Adjust excluded indices: shift indices >= insertIdx up by 1 */
+  const excl = cardExclusions[cardId] || new Set();
+  const shifted = new Set();
+  for (const idx of excl) {
+    shifted.add(idx >= insertIdx ? idx + 1 : idx);
+  }
+  cardExclusions[cardId] = shifted;
+  w.excluded_indices = [...shifted].sort((a, b) => a - b);
+
+  /* Track anchor (Qi-set) indices — shift existing ones, then add the new one */
+  const anchorSet = new Set();
+  for (const idx of (w.qi_anchor_indices || [])) {
+    anchorSet.add(idx >= insertIdx ? idx + 1 : idx);
+  }
+  anchorSet.add(insertIdx);
+  w.qi_anchor_indices = [...anchorSet];
+
+  /* ---- 2. Build (t, y) arrays for fitting (excluding excluded points) ---- */
+  const tFit = [], yFit = [];
+  for (let i = 0; i < w.t.length; i++) {
+    if (!shifted.has(i)) {
+      tFit.push(w.t[i]);
+      yFit.push(w.y_actual[i]);
     }
   }
 
-  /* Update both mini and full charts */
-  const refreshChart = (myChart) => {
-    if (!myChart) return;
-    const opt = myChart.getOption();
-    const seriesOpt = opt.series;
+  if (tFit.length < 3) {
+    showToast('Not enough data points to fit', 'warning');
+    return;
+  }
 
-    for (let si = 0; si < seriesOpt.length; si++) {
-      const s = seriesOpt[si];
-      if (!s.name) continue;
-      if (s.name.endsWith('Fitted')) {
-        seriesOpt[si].data = isDate
-          ? w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]])
-          : w.x.map((xv, i) => [xv, w.y_fitted[i]]);
-      }
-      if (s.name.endsWith('Forecast') && w.forecast && w.forecast.x) {
-        const fData = [];
-        let lfi = (w.y_fitted || []).length - 1;
-        while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--;
-        if (lfi >= 0) {
-          const bx = isDate ? parseDateStr(w.x[lfi]) : w.x[lfi];
-          fData.push([bx, w.y_fitted[lfi]]);
-        }
-        for (let i = 0; i < w.forecast.x.length; i++) {
-          const xv = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
-          fData.push([xv, w.forecast.y[i]]);
-        }
-        seriesOpt[si].data = fData;
+  /* ---- 3. Call /api/fit_inline to re-fit the model ---- */
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+
+  try {
+    const res = await fetch('/api/fit_inline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        t: tFit,
+        y: yFit,
+        model: model,
+        forecast_months: forecastMonths,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || 'Re-fit failed', 'error');
+      return;
+    }
+    const fit = await res.json();
+
+    /* ---- 4. Update well data with new fit results ---- */
+    w.params = fit.params;
+    w.equation = fit.equation || '';
+
+    /* Rebuild full fitted array (including excluded-nulls) using new params */
+    const func = (t) => evalDeclineModel(model, t, w.params);
+    // Determine first included index
+    const nonExcl = [];
+    for (let i = 0; i < w.t.length; i++) {
+      if (!shifted.has(i)) nonExcl.push(i);
+    }
+    const firstIncluded = nonExcl.length > 0 ? nonExcl[0] : 0;
+    for (let i = 0; i < w.t.length; i++) {
+      if (i < firstIncluded || shifted.has(i)) {
+        w.y_fitted[i] = null;
+      } else {
+        w.y_fitted[i] = func(w.t[i]);
       }
     }
-    myChart.setOption({ series: seriesOpt }, false);
-    const ps = cardPCurveState[cardId];
-    if (ps && ps.enabled) updatePCurveSeries(cardId, myChart);
-    updatePctChangeGraphic(cardId, myChart);
-  };
 
-  refreshChart(chartInstances[cardId]);
-  refreshChart(chartInstances['fullChart-' + cardId]);
-  updateQiDisplay(cardId);
+    /* Rebuild forecast */
+    if (fit.forecast_t && fit.forecast_y) {
+      const fX = [];
+      if (isDate) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = parseDateStr(w.x[0]);
+        // t was built as (date - firstDate)/86400 so firstDateMs corresponds to t[0]
+        // but t[0] might not be 0 if data was shifted, so use relation:
+        // dateMs = firstDateMs + (t_forecast - t[0]) * MS_PER_DAY
+        const tOffset = w.t[0] || 0;
+        for (let i = 0; i < fit.forecast_t.length; i++) {
+          const ms = firstDateMs + (fit.forecast_t[i] - tOffset) * MS_PER_DAY;
+          fX.push(formatDateTs(ms));
+        }
+      } else {
+        const x0 = w.x[0] || 0;
+        const t0 = w.t[0] || 0;
+        for (let i = 0; i < fit.forecast_t.length; i++) {
+          fX.push(fit.forecast_t[i] - t0 + x0);
+        }
+      }
+      w.forecast = {
+        x: fX,
+        y: fit.forecast_y,
+        t: fit.forecast_t,
+      };
+    }
+
+    /* ---- 5. Re-render charts ---- */
+    saveZoomState(cardId);
+    renderSingleChart(cardId, data, forecastMonths);
+
+    const fullId = 'fullChart-' + cardId;
+    if (chartInstances[fullId]) {
+      const fullChart = chartInstances[fullId];
+      const origOpts = chartInstances[cardId]?.getOption();
+      if (origOpts) {
+        fullChart.setOption(origOpts, true);
+      }
+    }
+
+    /* Persist the updated state to IDB */
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+
+  } catch (e) {
+    showToast('Re-fit request failed: ' + e.message, 'error');
+  }
 }
 
-/* Context menu handler: set Qi so curve passes through (X_click, Y_click) */
+/* Re-fit the current in-memory data via /api/fit_inline without a server round-trip.
+   Used when exclusions change on a card that has Qi anchor points, so those anchor
+   points (which only exist in cardLastData, not in the server dataframe) are preserved. */
+async function refitCurrentData(cardId) {
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length !== 1) { return runSingleDCA(cardId); }
+  const w = data.wells[0];
+  if (!w.y_actual || !w.t || !w.params) { return runSingleDCA(cardId); }
+
+  const model = data.model || 'exponential';
+  const isDate = w.is_date || false;
+  const shifted = cardExclusions[cardId] || new Set();
+  w.excluded_indices = [...shifted].sort((a, b) => a - b);
+
+  const tFit = [], yFit = [];
+  for (let i = 0; i < w.t.length; i++) {
+    if (!shifted.has(i)) { tFit.push(w.t[i]); yFit.push(w.y_actual[i]); }
+  }
+
+  if (tFit.length < 3) { showToast('Not enough data points to fit', 'warning'); return; }
+
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+
+  try {
+    const res = await fetch('/api/fit_inline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t: tFit, y: yFit, model, forecast_months: forecastMonths }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || 'Re-fit failed', 'error');
+      return;
+    }
+    const fit = await res.json();
+
+    w.params = fit.params;
+    w.equation = fit.equation || '';
+
+    const func = (t) => evalDeclineModel(model, t, w.params);
+    const nonExcl = [];
+    for (let i = 0; i < w.t.length; i++) { if (!shifted.has(i)) nonExcl.push(i); }
+    const firstIncluded = nonExcl.length > 0 ? nonExcl[0] : 0;
+    for (let i = 0; i < w.t.length; i++) {
+      w.y_fitted[i] = (i < firstIncluded || shifted.has(i)) ? null : func(w.t[i]);
+    }
+
+    if (fit.forecast_t && fit.forecast_y) {
+      const fX = [];
+      if (isDate) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = parseDateStr(w.x[0]);
+        const tOffset = w.t[0] || 0;
+        for (let i = 0; i < fit.forecast_t.length; i++) {
+          fX.push(formatDateTs(firstDateMs + (fit.forecast_t[i] - tOffset) * MS_PER_DAY));
+        }
+      } else {
+        const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+        for (let i = 0; i < fit.forecast_t.length; i++) { fX.push(fit.forecast_t[i] - t0 + x0); }
+      }
+      w.forecast = { x: fX, y: fit.forecast_y, t: fit.forecast_t };
+    }
+
+    saveZoomState(cardId);
+    renderSingleChart(cardId, data, forecastMonths);
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+  } catch (e) {
+    showToast('Re-fit failed: ' + e.message, 'error');
+  }
+}
+
+/* Context menu handler: add the clicked point as data and re-fit all curves */
 function setQiAtPoint(cardId) {
   const coord = _ctxMenuCoord;
   if (!coord) return;
@@ -5592,17 +5868,24 @@ function setQiAtPoint(cardId) {
     return;
   }
 
-  /* Convert clicked X to t value */
+  /* Convert clicked X to t value and display string */
   const tAnchor = xToT(w, coord.x);
+  const isDate = w.is_date || false;
+  let xDisplay;
+  if (isDate) {
+    xDisplay = coord.xLabel || formatDateTs(coord.x);
+  } else {
+    xDisplay = coord.x;
+  }
 
-  applyQiAtT(cardId, tAnchor, qiValue);
+  addPointAndRefit(cardId, tAnchor, qiValue, xDisplay);
 
   const qAtClick = qiValue.toFixed(2);
   const dateLabel = coord.xLabel || '';
-  showToast(`Qi set: q(${dateLabel}) = ${qAtClick}`, 'info', 3000);
+  showToast(`Point added: q(${dateLabel}) = ${qAtClick} — re-fitting…`, 'info', 3000);
 }
 
-/* Input widget handler: set Qi from the card's input controls */
+/* Input widget handler: add a Qi point from the card's input controls and re-fit */
 function applyQiFromInput(cardId) {
   const data = cardLastData[cardId];
   if (!data || !data.wells || data.wells.length !== 1) {
@@ -5626,24 +5909,33 @@ function applyQiFromInput(cardId) {
   }
 
   const isDate = w.is_date || false;
-  let tAnchor = 0;  /* default: set at t=0 */
+  let tAnchor = 0;
+  let xDisplay;
 
   if (isDate && dateInput && dateInput.value) {
-    /* Parse date from input (input type=date gives YYYY-MM-DD) */
     const parts = dateInput.value.split('-');
     if (parts.length === 3) {
       const ts = new Date(+parts[0], +parts[1] - 1, +parts[2]).getTime();
       tAnchor = xToT(w, ts);
+      xDisplay = formatDateTs(ts);
+    } else {
+      xDisplay = w.x[0];
     }
   } else if (!isDate && dateInput && dateInput.value) {
     const numX = parseFloat(dateInput.value);
     if (isFinite(numX)) {
       tAnchor = xToT(w, numX);
+      xDisplay = numX;
+    } else {
+      xDisplay = w.x[0];
     }
+  } else {
+    /* No date provided — anchor at first point */
+    xDisplay = isDate ? w.x[0] : (w.x[0] || 0);
   }
 
-  applyQiAtT(cardId, tAnchor, qiValue);
-  showToast(`Qi applied: ${qiValue.toFixed(2)} at ${dateInput ? dateInput.value || 'start' : 'start'}`, 'info', 3000);
+  addPointAndRefit(cardId, tAnchor, qiValue, xDisplay);
+  showToast(`Point added: ${qiValue.toFixed(2)} at ${dateInput ? dateInput.value || 'start' : 'start'} — re-fitting…`, 'info', 3000);
 }
 
 
@@ -7234,73 +7526,34 @@ async function exportCSV() {
 
 function saveWorkspaceToFile() {
 
-  const currentPage = pages.find(p => p.id === activePageId);
-  const state = {
+  /* Re-use the same comprehensive state collector that IDB auto-save uses */
+  const state = _collectWorkspaceState();
 
-    selX: '',
+  /* Also embed cardLastData so fitted curves, Qi anchors, P10/P90, etc. survive */
+  const cardData = {};
+  state.cards.forEach(c => {
+    if (cardLastData[c.cardId]) {
+      cardData[c.cardId] = cardLastData[c.cardId];
+    }
+  });
+  state.cardLastData = cardData;
 
-    selY: '',
-
-    selWellCol: '',
-
-    pages: currentPage ? [{ ...currentPage }] : [],
-
-    activePageId: activePageId,
-
-    cards: []
-
+  /* Fetch derived column formulas from the server so they survive export/import */
+  const _finishSave = (derivedCols) => {
+    if (derivedCols && derivedCols.length) state.derivedColumns = derivedCols;
+    const currentPage = pages.find(p => p.id === activePageId);
+    const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `workspace_${currentPage ? currentPage.name.replace(/\s+/g, '_') : 'page'}.dcapro`;
+    a.click();
+    showNotification('Workspace saved to file');
   };
 
-  document.querySelectorAll('.plot-card').forEach(card => {
-
-    if (card.dataset.page !== activePageId) return;
-
-    const cardId = card.id;
-
-    state.cards.push({
-
-      page: activePageId,
-
-      well: getSelectedWells(cardId),
-
-      selX: card.querySelector('.p-selX')?.value || '',
-
-      selY: card.querySelector('.p-selY')?.value || '',
-
-      selWellCol: card.querySelector('.p-selWellCol')?.value || '',
-
-      model: card.querySelector('.p-model')?.value || 'exponential',
-
-      forecast: card.querySelector('.p-forecast')?.value || '0',
-
-      title: card.querySelector('.p-title')?.value || '',
-
-      combine: isCombineMode(cardId),
-
-      combineAgg: getCombineAggMode(cardId),
-
-      exclusions: [...(cardExclusions[cardId] || [])],
-
-      styles: readCardStyles(cardId),
-
-      zoom: cardZoomState[cardId] || null
-
-    });
-
-  });
-
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-
-  const a = document.createElement('a');
-
-  a.href = URL.createObjectURL(blob);
-
-  a.download = `workspace_${currentPage ? currentPage.name.replace(/\s+/g, '_') : 'page'}.dcapro`;
-
-  a.click();
-
-  showNotification('Current page saved');
-
+  fetch('/api/derived_columns')
+    .then(r => r.ok ? r.json() : { columns: [] })
+    .then(d => _finishSave(d.columns || []))
+    .catch(() => _finishSave(null));
 }
 
 
@@ -7325,9 +7578,15 @@ async function loadWorkspaceFromFile() {
 
       const state = JSON.parse(text);
 
+      /* Embedded chart data (new format) */
+      const fileCardData = state.cardLastData || {};
+
       // Clear existing cards and pages
-      document.querySelectorAll('.plot-card').forEach(card => removeCard(card.id));
-      // Remove existing page column UIs
+      document.querySelectorAll('.plot-card').forEach(card => {
+        if (chartInstances[card.id]) { chartInstances[card.id].dispose(); delete chartInstances[card.id]; }
+      });
+      document.querySelectorAll('.card-wrap').forEach(w => w.remove());
+      document.querySelectorAll('.plot-card').forEach(card => card.remove());
       document.querySelectorAll('.page-columns-card').forEach(el => el.remove());
 
       pages.length = 0;
@@ -7352,15 +7611,65 @@ async function loadWorkspaceFromFile() {
       activePageId = state.activePageId || state.activeWsId || pages[0].id;
       if (!pages.some(p => p.id === activePageId)) activePageId = pages[0].id;
 
+      // Restore theme if saved
+      if (state.theme) {
+        document.documentElement.setAttribute('data-theme', state.theme);
+        const tb = document.getElementById('themeToggle');
+        if (tb) tb.textContent = state.theme === 'light' ? '\u2600\uFE0F Light' : '\uD83C\uDF19 Dark';
+      }
+
       renderPageTabs();
 
-      // Recreate cards in their pages with per-card column selections
+      // Check if server has data
+      let serverHasData = false;
+      try {
+        const res = await fetch('/api/columns');
+        if (res.ok) {
+          const colData = await res.json();
+          uploadedColumns = colData.columns || [];
+          numericColumns = colData.numeric_columns || [];
+          serverHasData = uploadedColumns.length > 0;
+        }
+      } catch (e) { /* server not available */ }
+
+      if (serverHasData) {
+        await _restoreImportTab();
+
+        /* Re-apply derived columns (calculated fields) if stored in the file */
+        if (state.derivedColumns && state.derivedColumns.length) {
+          for (const dc of state.derivedColumns) {
+            try {
+              await fetch('/api/data/add_column', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: dc.name, formula: dc.formula }),
+              });
+            } catch (e) { console.warn('Could not restore derived column:', dc.name, e); }
+          }
+          /* Refresh column lists after adding derived columns */
+          try {
+            const res = await fetch('/api/columns');
+            if (res.ok) {
+              const colData = await res.json();
+              uploadedColumns = colData.columns || [];
+              numericColumns = colData.numeric_columns || [];
+            }
+          } catch (e) { /* ignore */ }
+        }
+      } else if (state.uploadedColumns) {
+        uploadedColumns = state.uploadedColumns;
+        numericColumns = state.numericColumns || [];
+        allWells = state.allWells || [];
+        populateSelectors();
+      }
+
+      // Recreate cards with full state
 
       for (const cs of (state.cards || [])) {
 
         const savedPage = activePageId;
 
-        activePageId = cs.page || cs.workspace || pages[0].id;
+        activePageId = cs.pageId || cs.page || cs.workspace || pages[0].id;
 
         // Determine per-card columns (backward compat: fall back to page/global)
         const cardSelX = cs.selX || state.selX || '';
@@ -7368,30 +7677,61 @@ async function loadWorkspaceFromFile() {
         const cardSelWellCol = cs.selWellCol || state.selWellCol || '';
 
         // Fetch wells for this card's well column
-        if (cardSelWellCol) {
+        if (cardSelWellCol && serverHasData) {
           try {
             const res = await fetch(`/api/wells?well_col=${encodeURIComponent(cardSelWellCol)}`);
             const data = await res.json();
             allWells = data.wells || [];
-          } catch (e) { allWells = []; }
+          } catch (e) { allWells = state.allWells || []; }
+        } else {
+          allWells = state.allWells || [];
         }
 
-        const newId = addPlotCard(cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, '', cs.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol);
+        const newId = addPlotCard(cs.wells || cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, cs.header || '', cs.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol);
 
-        if (cs.exclusions) cardExclusions[newId] = new Set(cs.exclusions);
+        const cardEl = document.getElementById(newId);
+        if (cardEl) cardEl.dataset.page = cs.pageId || cs.page || activePageId;
+
+        /* Restore all per-card state */
+        if (cs.exclusions?.length) cardExclusions[newId] = new Set(cs.exclusions);
+        if (cs.userLines?.length) cardUserLines[newId] = cs.userLines;
+        if (cs.annotations?.length) cardAnnotations[newId] = cs.annotations;
+        if (cs.valueLabels && cs.valueLabels !== 'none') cardValueLabels[newId] = cs.valueLabels;
+        if (cs.logScale) cardLogScale[newId] = true;
+        if (cs.logScaleX) cardLogScaleX[newId] = true;
+        if (cs.pctChange) cardPctChange[newId] = true;
+        if (cs.axisLabels) cardAxisLabels[newId] = cs.axisLabels;
+        if (cs.axisPositions) cardAxisPositions[newId] = cs.axisPositions;
+        if (cs.headers) cardHeaders[newId] = cs.headers;
+        if (cs.zoomState || cs.zoom) cardZoomState[newId] = cs.zoomState || cs.zoom;
+        if (cs.pCurveState) cardPCurveState[newId] = cs.pCurveState;
 
         if (cs.styles) {
           const mergedStyles = { ...getDefaultStyles(), ...cs.styles };
           cardStyles[newId] = mergedStyles;
           applyStylesToCard(newId, mergedStyles);
+          const headerEl = cardEl?._headerInput || cardEl?.querySelector('.p-header');
+          if (headerEl && mergedStyles.headerFontSize) {
+            headerEl.style.fontSize = mergedStyles.headerFontSize + 'rem';
+            headerEl.style.color = mergedStyles.headerColor || '';
+          }
         }
 
-        if (cs.zoom) cardZoomState[newId] = cs.zoom;
+        /* Restore chart data from file if available, otherwise re-run DCA */
+        const savedData = fileCardData[cs.cardId];
+        if (savedData) {
+          cardLastData[newId] = savedData;
+          try {
+            renderSingleChart(newId, savedData, cs.forecast);
+          } catch (e) {
+            console.warn('Failed to render saved chart for', newId, e);
+            if (serverHasData) await runSingleDCA(newId);
+          }
+        } else if (serverHasData) {
+          await runSingleDCA(newId);
+        }
 
         activePageId = savedPage;
-
-        await runSingleDCA(newId);
-
       }
 
       switchPage(activePageId);
@@ -7407,6 +7747,9 @@ async function loadWorkspaceFromFile() {
       document.querySelector('[data-tab="dca"]').classList.add('active');
 
       document.getElementById('tab-dca').classList.add('active');
+
+      /* Trigger auto-save so the loaded state is persisted to IDB */
+      _debouncedAutoSave();
 
     } catch (e) { alert('Failed to load workspace: ' + e.message); }
 
