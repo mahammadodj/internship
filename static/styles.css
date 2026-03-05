@@ -1556,6 +1556,75 @@ button.btn-sm {
   color: var(--red);
 }
 
+.curve-summary-wrap {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.curve-summary-title {
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.curve-summary-table-wrap {
+  overflow-x: auto;
+}
+
+.curve-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1280px;
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.curve-summary-table th,
+.curve-summary-table td {
+  padding: 4px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.curve-summary-table th {
+  font-size: .65rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .35px;
+}
+
+.curve-summary-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.curve-summary-left {
+  text-align: left !important;
+  font-weight: 600;
+}
+
+.curve-summary-formula {
+  text-align: left !important;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: Consolas, 'Courier New', monospace;
+}
+
+.curve-summary-table .positive {
+  color: var(--green);
+}
+
+.curve-summary-table .negative {
+  color: var(--red);
+}
+
 /* --- Sortable Data Table --- */
 .data-table-toolbar {
   display: flex;

@@ -39,6 +39,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     }
   });
 
+
 });
 
 
@@ -1859,6 +1860,11 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="dca-stats-summary" id="dcaStats-${cardId}" style="display:none;"></div>
 
+      <div class="curve-summary-wrap" id="curveSummaryWrap-${cardId}" style="display:none;">
+        <div class="curve-summary-title">Curve Summary</div>
+        <div class="curve-summary-table-wrap" id="curveSummary-${cardId}"></div>
+      </div>
+
       <div class="multi-fit-panel" id="multiFitPanel-${cardId}" style="display:none;"></div>
 
       <div class="excl-hint" id="exclHint-${cardId}">Click scatter points to exclude them from curve fitting</div>
@@ -3580,6 +3586,8 @@ function updateQiDisplay(cardId) {
     if (qiInputPanel) qiInputPanel.style.display = 'none';
   }
 
+  renderCurveSummaryTable(cardId, data);
+
 }
 
 
@@ -3884,9 +3892,14 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   const excluded = new Set(firstW.excluded_indices || []);
 
+  const _mfForExcl = cardMultiFits[cardId] || [];
+  const _mfUsedIdx = new Set();
+  _mfForExcl.forEach(mf => (mf.indices || []).forEach(i => _mfUsedIdx.add(i)));
+  const _visibleExclCount = [...excluded].filter(i => !_mfUsedIdx.has(i)).length;
+
   cardExclusions[cardId] = excluded;
 
-  exclHint.textContent = excluded.size > 0 ? `${excluded.size} point(s) excluded — click to toggle` : 'Click scatter points to exclude / include';
+  exclHint.textContent = _visibleExclCount > 0 ? `${_visibleExclCount} point(s) excluded — click to toggle` : 'Click scatter points to exclude / include';
 
 
 
@@ -3960,111 +3973,18 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
 
-  /* --- DCA Stats: first/last values for actual and fitted --- */
-
+  /* Deprecated: old mini stats table is superseded by the curve summary table. */
   const dcaStatsDiv = document.getElementById('dcaStats-' + cardId);
-
-  if (dcaStatsDiv && allWellsData.length > 0) {
-
-    const sw = allWellsData[0];
-
-    const exclSet = new Set(sw.excluded_indices || []);
-
-    const actualVals = sw.y_actual.filter((v, i) => v != null && !exclSet.has(i));
-
-    const fittedVals = sw.y_fitted ? sw.y_fitted.filter(v => v != null) : [];
-
-    if (actualVals.length >= 2 || fittedVals.length >= 2) {
-
-      const statsRows = [];
-
-      const addStatsRow = (seriesName, first, last) => {
-        const diff = last - first;
-        const pct = first !== 0 ? ((diff / Math.abs(first)) * 100) : 0;
-        const sign = diff >= 0 ? '+' : '';
-        const cls = diff >= 0 ? 'positive' : 'negative';
-        statsRows.push({
-          seriesName,
-          first,
-          last,
-          diff,
-          pct,
-          sign,
-          cls,
-        });
-      };
-
-      if (actualVals.length >= 2) {
-        const aFirst = actualVals[0], aLast = actualVals[actualVals.length - 1];
-        addStatsRow('Actual', aFirst, aLast);
-      }
-
-      if (fittedVals.length >= 2) {
-        const fFirst = fittedVals[0], fLast = fittedVals[fittedVals.length - 1];
-        addStatsRow('Fitted', fFirst, fLast);
-      }
-
-      /* --- P10 / P90 stats --- */
-      /* Use main P-curve settings if available */
-      const pcs = (cardPCurveState[cardId] || {})['main'];
-      if (pcs && pcs.enabled && sw.t) {
-        const isDateStat = firstW.is_date || false;
-        const p10Pts = buildPCurveData(sw, data, pcs.p10Di, isDateStat, null);
-        const p90Pts = buildPCurveData(sw, data, pcs.p90Di, isDateStat, null);
-        const p10Ys = p10Pts.map(p => p[1]).filter(v => v != null && isFinite(v));
-        const p90Ys = p90Pts.map(p => p[1]).filter(v => v != null && isFinite(v));
-        if (p10Ys.length >= 2) {
-          const p10First = p10Ys[0], p10Last = p10Ys[p10Ys.length - 1];
-          addStatsRow('P10', p10First, p10Last);
-        }
-        if (p90Ys.length >= 2) {
-          const p90First = p90Ys[0], p90Last = p90Ys[p90Ys.length - 1];
-          addStatsRow('P90', p90First, p90Last);
-        }
-      }
-
-      if (statsRows.length > 0) {
-        const rowsHtml = statsRows.map(r => (
-          `<tr>`
-          + `<td class="dca-mini-series">${r.seriesName}</td>`
-          + `<td>${r.first.toFixed(2)}</td>`
-          + `<td>${r.last.toFixed(2)}</td>`
-          + `<td class="${r.cls}">${r.sign}${r.diff.toFixed(2)}</td>`
-          + `<td class="${r.cls}">${r.sign}${r.pct.toFixed(1)}%</td>`
-          + `</tr>`
-        )).join('');
-
-        dcaStatsDiv.innerHTML = `
-          <table class="dca-mini-table">
-            <thead>
-              <tr>
-                <th>Series</th>
-                <th>First</th>
-                <th>Last</th>
-                <th>Δ</th>
-                <th>%</th>
-              </tr>
-            </thead>
-            <tbody>${rowsHtml}</tbody>
-          </table>
-        `;
-
-        dcaStatsDiv.style.display = 'block';
-      } else {
-        dcaStatsDiv.style.display = 'none';
-      }
-
-    } else {
-
-      dcaStatsDiv.style.display = 'none';
-
-    }
-
+  if (dcaStatsDiv) {
+    dcaStatsDiv.innerHTML = '';
+    dcaStatsDiv.style.display = 'none';
   }
 
 
 
   const st = readCardStyles(cardId);
+
+  renderCurveSummaryTable(cardId, data);
 
   const customTitle = card.querySelector('.p-title')?.value || '';
 
@@ -4126,6 +4046,15 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   const isSingle = allWellsData.length === 1;
 
+  const multiFitsForPoints = cardMultiFits[cardId] || [];
+  const mfIndexMeta = multiFitsForPoints.map(mf => ({
+    id: mf.id,
+    color: mf.color,
+    indexSet: new Set(mf.indices || []),
+  }));
+  const anyMfIncluded = new Set();
+  mfIndexMeta.forEach(m => m.indexSet.forEach(i => anyMfIncluded.add(i)));
+
 
 
   allWellsData.forEach((w, wIdx) => {
@@ -4149,6 +4078,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
       const anchorSet = new Set(w.qi_anchor_indices || []);
 
       const incD = [], exclD = [], anchorD = [];
+      const mfBuckets = {};
+      if (isSingle && wIdx === 0) mfIndexMeta.forEach(m => { mfBuckets[m.id] = []; });
 
       for (let i = 0; i < actualLen; i++) {
 
@@ -4156,7 +4087,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         const pt = [ts, w.y_actual[i], i];
 
-        if (isSingle && excluded.has(i)) exclD.push(pt);
+        if (isSingle && wIdx === 0) {
+          mfIndexMeta.forEach(m => {
+            if (m.indexSet.has(i)) mfBuckets[m.id].push(pt);
+          });
+        }
+
+        if (isSingle && excluded.has(i) && !anyMfIncluded.has(i)) exclD.push(pt);
 
         else if (isSingle && anchorSet.has(i)) anchorD.push(pt);
 
@@ -4166,9 +4103,27 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: incD });
 
-      if (isSingle && excluded.size > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
       if (isSingle && anchorD.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD, z: 10 });
+
+      if (isSingle && wIdx === 0) {
+        mfIndexMeta.forEach(m => {
+          const pts = mfBuckets[m.id] || [];
+          if (pts.length > 0) {
+            series.push({
+              name: '_mfinc_' + m.id,
+              type: 'scatter',
+              symbolSize: Math.max(st.actualSize - 1, 6),
+              symbol: 'circle',
+              z: 6,
+              itemStyle: { color: m.color, borderColor: '#ffffff', borderWidth: 1.2 },
+              data: pts,
+              tooltip: { show: false },
+            });
+          }
+        });
+      }
 
       if (w.y_fitted || hasForecast) {
 
@@ -4201,14 +4156,44 @@ function renderSingleChart(cardId, data, forecastMonths) {
       const anchorSet2 = new Set(w.qi_anchor_indices || []);
 
       const incD = [], exclD = [], anchorD2 = [];
+      const mfBuckets = {};
+      if (isSingle && wIdx === 0) mfIndexMeta.forEach(m => { mfBuckets[m.id] = []; });
 
-      for (let i = 0; i < actualLen; i++) { const pt = [w.x[i], w.y_actual[i], i]; if (isSingle && excluded.has(i)) exclD.push(pt); else if (isSingle && anchorSet2.has(i)) anchorD2.push(pt); else incD.push(pt); }
+      for (let i = 0; i < actualLen; i++) {
+        const pt = [w.x[i], w.y_actual[i], i];
+        if (isSingle && wIdx === 0) {
+          mfIndexMeta.forEach(m => {
+            if (m.indexSet.has(i)) mfBuckets[m.id].push(pt);
+          });
+        }
+        if (isSingle && excluded.has(i) && !anyMfIncluded.has(i)) exclD.push(pt);
+        else if (isSingle && anchorSet2.has(i)) anchorD2.push(pt);
+        else incD.push(pt);
+      }
 
       series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: incD });
 
-      if (isSingle && excluded.size > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
       if (isSingle && anchorD2.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD2, z: 10 });
+
+      if (isSingle && wIdx === 0) {
+        mfIndexMeta.forEach(m => {
+          const pts = mfBuckets[m.id] || [];
+          if (pts.length > 0) {
+            series.push({
+              name: '_mfinc_' + m.id,
+              type: 'scatter',
+              symbolSize: Math.max(st.actualSize - 1, 6),
+              symbol: 'circle',
+              z: 6,
+              itemStyle: { color: m.color, borderColor: '#ffffff', borderWidth: 1.2 },
+              data: pts,
+              tooltip: { show: false },
+            });
+          }
+        });
+      }
 
       if (w.y_fitted || hasForecast) {
         /* Build combined fitted + forecast data as a single series */
@@ -4859,6 +4844,264 @@ function renderSingleChart(cardId, data, forecastMonths) {
    ==================================================================== */
 
 let _activeSelection = null;
+
+function renderCurveSummaryTable(cardId, data) {
+  const wrap = document.getElementById('curveSummaryWrap-' + cardId);
+  const host = document.getElementById('curveSummary-' + cardId);
+  if (!wrap || !host) return;
+
+  const wells = (data && data.wells) ? data.wells : [];
+  const multiFits = cardMultiFits[cardId] || [];
+  const hiddenSet = cardHiddenSeries[cardId] || new Set();
+
+  const fmtNum = (v, digits = 4) => {
+    if (!Number.isFinite(v)) return '—';
+    return Number(v).toFixed(digits);
+  };
+
+  const fmtShort = (v, digits = 4) => {
+    if (!Number.isFinite(v)) return '—';
+    return Number(v).toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  };
+
+  const buildFormula = (model, params, fallbackEquation) => {
+    if (!params || !Number.isFinite(params.qi) || !Number.isFinite(params.di)) return fallbackEquation || '—';
+    if (model === 'exponential') {
+      return 'q(t)=' + fmtShort(params.qi) + '*exp(-' + fmtShort(params.di, 6) + '*t)';
+    }
+    if (model === 'hyperbolic') {
+      const b = Number.isFinite(params.b) ? params.b : 0.5;
+      return 'q(t)=' + fmtShort(params.qi) + '/(1+' + fmtShort(b) + '*' + fmtShort(params.di, 6) + '*t)^(1/' + fmtShort(b) + ')';
+    }
+    if (model === 'harmonic') {
+      return 'q(t)=' + fmtShort(params.qi) + '/(1+' + fmtShort(params.di, 6) + '*t)';
+    }
+    return fallbackEquation || '—';
+  };
+
+  const getStats = (arr) => {
+    const vals = (arr || []).filter(v => Number.isFinite(v));
+    if (vals.length < 2) return null;
+    const first = vals[0];
+    const last = vals[vals.length - 1];
+    const delta = last - first;
+    const pct = first !== 0 ? (delta / Math.abs(first)) * 100 : 0;
+    return {
+      first,
+      last,
+      delta,
+      pct,
+      sign: delta >= 0 ? '+' : '',
+      cls: delta >= 0 ? 'positive' : 'negative',
+    };
+  };
+
+  const rows = [];
+
+  wells.forEach((w) => {
+    const prefix = wells.length === 1 ? 'Main Fit' : (w.well + ' Main Fit');
+    const fittedName = wells.length === 1 ? 'Fitted' : (w.well + ' Fitted');
+    if (hiddenSet.has(fittedName)) return;
+
+    const fittedVals = (w.y_fitted || []).filter(v => Number.isFinite(v));
+    const forecastVals = (w.forecast && w.forecast.y) ? w.forecast.y.filter(v => Number.isFinite(v)) : [];
+    const seriesStats = getStats(fittedVals.concat(forecastVals));
+    if (!seriesStats) return;
+
+    const fcStats = getStats(forecastVals);
+    const model = data.model || '—';
+    const baseParams = w.params || {};
+    rows.push({
+      curve: prefix,
+      model,
+      formula: buildFormula(model, baseParams, w.equation),
+      qi: Number.isFinite(baseParams.qi) ? baseParams.qi : null,
+      di: Number.isFinite(baseParams.di) ? baseParams.di : null,
+      forecastPoints: forecastVals.length,
+      fcStats,
+      seriesStats,
+    });
+
+    const mainPs = (cardPCurveState[cardId] || {}).main;
+    if (mainPs && mainPs.enabled) {
+      const isDate = w.is_date || false;
+      const p10Di = mainPs.p10Di;
+      const p90Di = mainPs.p90Di;
+      const p10Name = (wells.length === 1 ? '' : (w.well + ' ')) + 'P10 (Di=' + (Math.round(p10Di * 1e6) / 1e6) + ')';
+      const p90Name = (wells.length === 1 ? '' : (w.well + ' ')) + 'P90 (Di=' + (Math.round(p90Di * 1e6) / 1e6) + ')';
+
+      if (!hiddenSet.has(p10Name)) {
+        const p10Params = { ...baseParams, di: p10Di };
+        const p10Pts = buildPCurveData(w, data, p10Di, isDate, null);
+        const p10Vals = p10Pts.map(p => p[1]).filter(v => Number.isFinite(v));
+        const p10SeriesStats = getStats(p10Vals);
+        if (p10SeriesStats) {
+          const fcCount = (w.forecast && w.forecast.y) ? w.forecast.y.length : 0;
+          const p10FcVals = fcCount > 0 ? p10Vals.slice(-fcCount) : [];
+          rows.push({
+            curve: wells.length === 1 ? 'P10' : (w.well + ' P10'),
+            model,
+            formula: buildFormula(model, p10Params, ''),
+            qi: Number.isFinite(p10Params.qi) ? p10Params.qi : null,
+            di: Number.isFinite(p10Params.di) ? p10Params.di : null,
+            forecastPoints: p10FcVals.length,
+            fcStats: getStats(p10FcVals),
+            seriesStats: p10SeriesStats,
+          });
+        }
+      }
+
+      if (!hiddenSet.has(p90Name)) {
+        const p90Params = { ...baseParams, di: p90Di };
+        const p90Pts = buildPCurveData(w, data, p90Di, isDate, null);
+        const p90Vals = p90Pts.map(p => p[1]).filter(v => Number.isFinite(v));
+        const p90SeriesStats = getStats(p90Vals);
+        if (p90SeriesStats) {
+          const fcCount = (w.forecast && w.forecast.y) ? w.forecast.y.length : 0;
+          const p90FcVals = fcCount > 0 ? p90Vals.slice(-fcCount) : [];
+          rows.push({
+            curve: wells.length === 1 ? 'P90' : (w.well + ' P90'),
+            model,
+            formula: buildFormula(model, p90Params, ''),
+            qi: Number.isFinite(p90Params.qi) ? p90Params.qi : null,
+            di: Number.isFinite(p90Params.di) ? p90Params.di : null,
+            forecastPoints: p90FcVals.length,
+            fcStats: getStats(p90FcVals),
+            seriesStats: p90SeriesStats,
+          });
+        }
+      }
+    }
+  });
+
+  multiFits.forEach((mf) => {
+    const name = 'Curve #' + mf.id + ' (' + mf.model + ')';
+    if (hiddenSet.has(name)) return;
+
+    const fittedVals = (mf.fittedData || []).map(p => Array.isArray(p) ? p[1] : null).filter(v => Number.isFinite(v));
+    let forecastVals = (mf.forecastData || []).map(p => Array.isArray(p) ? p[1] : null).filter(v => Number.isFinite(v));
+
+    if (fittedVals.length > 0 && forecastVals.length > 0) {
+      const lastFit = fittedVals[fittedVals.length - 1];
+      if (Math.abs(forecastVals[0] - lastFit) < 1e-12) forecastVals = forecastVals.slice(1);
+    }
+
+    const seriesStats = getStats(fittedVals.concat(forecastVals));
+    if (!seriesStats) return;
+
+    rows.push({
+      curve: 'Curve #' + mf.id,
+      model: mf.model || '—',
+      formula: buildFormula(mf.model, mf.params || {}, mf.equation || ''),
+      qi: mf.params && Number.isFinite(mf.params.qi) ? mf.params.qi : null,
+      di: mf.params && Number.isFinite(mf.params.di) ? mf.params.di : null,
+      forecastPoints: forecastVals.length,
+      fcStats: getStats(forecastVals),
+      seriesStats,
+    });
+
+    const mfPs = (cardPCurveState[cardId] || {})['mf_' + mf.id];
+    if (mfPs && mfPs.enabled && mf.params && wells[0] && wells[0].t) {
+      const w0 = wells[0];
+      const idxMin = mf.indices ? Math.min(...mf.indices) : 0;
+      const idxMax = mf.indices ? Math.max(...mf.indices) : w0.t.length - 1;
+
+      const buildMfVals = (diVal) => {
+        const pParams = { ...mf.params, di: diVal };
+        const vals = [];
+        for (let i = idxMin; i <= Math.min(idxMax, w0.t.length - 1); i++) {
+          const y = evalDeclineModel(mf.model, w0.t[i], pParams);
+          if (Number.isFinite(y)) vals.push(y);
+        }
+        return vals;
+      };
+
+      const p10Name = name + ' P10';
+      if (!hiddenSet.has(p10Name)) {
+        const p10Vals = buildMfVals(mfPs.p10Di);
+        const p10Stats = getStats(p10Vals);
+        if (p10Stats) {
+          rows.push({
+            curve: 'Curve #' + mf.id + ' P10',
+            model: mf.model || '—',
+            formula: buildFormula(mf.model, { ...mf.params, di: mfPs.p10Di }, ''),
+            qi: Number.isFinite(mf.params.qi) ? mf.params.qi : null,
+            di: Number.isFinite(mfPs.p10Di) ? mfPs.p10Di : null,
+            forecastPoints: 0,
+            fcStats: null,
+            seriesStats: p10Stats,
+          });
+        }
+      }
+
+      const p90Name = name + ' P90';
+      if (!hiddenSet.has(p90Name)) {
+        const p90Vals = buildMfVals(mfPs.p90Di);
+        const p90Stats = getStats(p90Vals);
+        if (p90Stats) {
+          rows.push({
+            curve: 'Curve #' + mf.id + ' P90',
+            model: mf.model || '—',
+            formula: buildFormula(mf.model, { ...mf.params, di: mfPs.p90Di }, ''),
+            qi: Number.isFinite(mf.params.qi) ? mf.params.qi : null,
+            di: Number.isFinite(mfPs.p90Di) ? mfPs.p90Di : null,
+            forecastPoints: 0,
+            fcStats: null,
+            seriesStats: p90Stats,
+          });
+        }
+      }
+    }
+  });
+
+  if (rows.length === 0) {
+    wrap.style.display = 'none';
+    host.innerHTML = '';
+    return;
+  }
+
+  const htmlRows = rows.map((r) => {
+    const fc = r.fcStats;
+    const ss = r.seriesStats;
+    const fcCls = fc ? fc.cls : '';
+    return '<tr>'
+      + '<td class="curve-summary-left">' + r.curve + '</td>'
+      + '<td>' + r.model + '</td>'
+      + '<td class="curve-summary-formula">' + (r.formula || '—') + '</td>'
+      + '<td>' + (r.qi == null ? '—' : fmtNum(r.qi, 4)) + '</td>'
+      + '<td>' + (r.di == null ? '—' : fmtNum(r.di, 6)) + '</td>'
+      + '<td>' + r.forecastPoints + '</td>'
+      + '<td>' + (fc ? fmtNum(fc.first, 2) : '—') + '</td>'
+      + '<td>' + (fc ? fmtNum(fc.last, 2) : '—') + '</td>'
+      + '<td class="' + fcCls + '">' + (fc ? (fc.sign + fmtNum(fc.delta, 2)) : '—') + '</td>'
+      + '<td class="' + fcCls + '">' + (fc ? (fc.sign + fmtNum(fc.pct, 1) + '%') : '—') + '</td>'
+      + '<td>' + fmtNum(ss.first, 2) + '</td>'
+      + '<td>' + fmtNum(ss.last, 2) + '</td>'
+      + '<td class="' + ss.cls + '">' + ss.sign + fmtNum(ss.delta, 2) + '</td>'
+      + '<td class="' + ss.cls + '">' + ss.sign + fmtNum(ss.pct, 1) + '%</td>'
+      + '</tr>';
+  }).join('');
+
+  host.innerHTML = '<table class="curve-summary-table">'
+    + '<thead><tr>'
+    + '<th class="curve-summary-left">Curve</th>'
+    + '<th>Model</th>'
+    + '<th class="curve-summary-formula">Formula</th>'
+    + '<th>Qi</th>'
+    + '<th>Di</th>'
+    + '<th>Fcst Pts</th>'
+    + '<th>Fcst First</th>'
+    + '<th>Fcst Last</th>'
+    + '<th>Fcst Δ</th>'
+    + '<th>Fcst %</th>'
+    + '<th>Series First</th>'
+    + '<th>Series Last</th>'
+    + '<th>Series Δ</th>'
+    + '<th>Series %</th>'
+    + '</tr></thead><tbody>' + htmlRows + '</tbody></table>';
+
+  wrap.style.display = 'block';
+}
 
 function setResetZoomButtonsVisible(cardId, visible) {
   const miniBtn = document.getElementById('resetZoom-' + cardId);
