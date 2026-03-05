@@ -162,7 +162,7 @@ const cardCtrlSelected = {};      // cardId -> Set<index> for Ctrl+click multi-s
 const cardMultiFits = {};         // cardId -> Array<{id, model, params, equation, indices:[], color, fittedData:[[x,y],...], forecastData:[[x,y],...]}>  
 const cardHiddenSeries = {};      // cardId -> Set<seriesName> of manually removed series
 let _multiFitNextId = 1;
-const MULTI_FIT_COLORS = ['#e040fb','#00bcd4','#ff9800','#8bc34a','#ff5722','#9c27b0','#009688','#ffc107','#795548','#607d8b'];
+const MULTI_FIT_COLORS = ['#e040fb', '#00bcd4', '#ff9800', '#8bc34a', '#ff5722', '#9c27b0', '#009688', '#ffc107', '#795548', '#607d8b'];
 let _multiPointMenuJustOpened = false;
 
 
@@ -1827,8 +1827,6 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
         <button onclick="toggleStylePanel('${cardId}')" title="Customize Style">🎨 Style</button>
 
-        <button id="pcurveBtn-${cardId}" onclick="togglePCurves('${cardId}')" title="Toggle P10/P50/P90 uncertainty curves" style="position:relative;">📊 P10/P90</button>
-
         <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template">💾 Template</button>
 
         <button onclick="downloadChart('${cardId}','png')" title="Download PNG">PNG</button>
@@ -2671,7 +2669,7 @@ function getPctChangeGraphic(cardId) {
 
   /* P10 / P50 / P90 curves */
   if (pw.params && pw.y_fitted) {
-    const ps = cardPCurveState[cardId];
+    const ps = (cardPCurveState[cardId] || {})['main'];
     const st = readCardStyles(cardId) || {};
 
     const addPCurvePct = (type, name, diVal, color) => {
@@ -2788,615 +2786,385 @@ function evalCurveArray(model, tArr, params) {
 
 
 
-function togglePCurves(cardId) {
-
+/* Toggle P10/P90 curves for a SPECIFIC curve (main or multi-fit) */
+function toggleCurvePCurves(cardId, cType, cId) {
   const data = cardLastData[cardId];
+  if (!data || !data.wells || !data.wells[0]) return;
+  const w = data.wells[0];
 
-  const model = data ? data.model : 'exponential';
+  const curveKey = cType === 'main' ? 'main' : 'mf_' + cId;
 
-  const w = data && data.wells && data.wells[0];
+  let baseDi = 0.01;
+  if (cType === 'main') {
+    if (w.params && w.params.di) baseDi = Math.abs(w.params.di);
+  } else {
+    const fits = cardMultiFits[cardId] || [];
+    const mf = fits.find(f => f.id == cId);
+    if (mf && mf.params && mf.params.di) {
+      baseDi = Math.abs(mf.params.di);
+    }
+  }
 
-  const baseDi = (w && w.params && w.params.di) ? w.params.di : 0.01;
+  if (!cardPCurveState[cardId]) cardPCurveState[cardId] = {};
 
-
-
-  if (!cardPCurveState[cardId]) {
-
-    cardPCurveState[cardId] = {
-
+  if (!cardPCurveState[cardId][curveKey]) {
+    cardPCurveState[cardId][curveKey] = {
       enabled: false,
-
-      p10Di: baseDi * 0.7,   // lower D → slower decline → higher rates → P10
-
-      p90Di: baseDi * 1.5,   // higher D → faster decline → lower rates → P90
-
+      p10Di: baseDi * 0.7,
+      p90Di: baseDi * 1.5,
     };
+  }
 
-  }
-  const ps = cardPCurveState[cardId];
+  const ps = cardPCurveState[cardId][curveKey];
   ps.enabled = !ps.enabled;
-  const btn = document.getElementById('pcurveBtn-' + cardId);
-  if (btn) {
-    btn.style.borderColor = ps.enabled ? 'var(--accent)' : '';
-    btn.style.color = ps.enabled ? 'var(--accent)' : '';
-  }
+
   if (cardLastData[cardId]) {
     saveZoomState(cardId);
     renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
   }
+  updateMultiFitPanel(cardId);
 }
 
-
-
 function setupPCurveDragHandles(cardId, myChart) {
-
-  const ps = cardPCurveState[cardId];
-
-  if (!ps || !ps.enabled) return;
+  const allPs = cardPCurveState[cardId] || {};
+  const anyEnabled = Object.values(allPs).some(ps => ps && ps.enabled);
+  if (!anyEnabled) return;
 
   const data = cardLastData[cardId];
-
   if (!data || !data.wells || data.wells.length === 0) return;
-
   const w = data.wells[0];
-
   if (!w.y_fitted || !w.params || !w.t) return;
 
-  const model = data.model || 'exponential';
-
-  const qi = w.params.qi;
-
-  const bParam = w.params.b;
-
-  if (!qi) return;
-
-
-
   const isDate = w.is_date || false;
-
   const zr = myChart.getZr();
-
-  let dragging = null;   // 'p10' | 'p90' | null
-
+  let dragging = null;   // { which: 'p10'|'p90', curveKey: 'main'|'mf_X' }
   let startPxY = 0;
-
-  let anchorT = 0;       // t value of the anchor (where user clicked)
-
-  let anchorDi = 0;      // starting Di for the dragged curve
-
-
-
-  /* Hit-test: is the pixel point close to a P10 or P90 series?
-
-     Also returns the nearest data-point index for the anchor */
+  let anchorT = 0;
+  let anchorDi = 0;
 
   function hitTestSeries(px, py) {
-
     const THRESHOLD = 10;
-
     const opt = myChart.getOption();
-
     if (!opt || !opt.series) return null;
-
     for (let si = 0; si < opt.series.length; si++) {
-
       const s = opt.series[si];
-
-      if (!s.name) continue;
-
-      const isP10 = s.name.startsWith('P10');
-
-      const isP90 = s.name.startsWith('P90');
-
-      if (!isP10 && !isP90) continue;
+      if (!s.id) continue;
+      const parts = s.id.split('|');
+      if (parts.length < 2 || (parts[0] !== 'p10' && parts[0] !== 'p90')) continue;
+      const which = parts[0];
+      const curveKey = parts[1];
 
       const sData = s.data;
-
       if (!sData || sData.length === 0) continue;
-
       let prevPt = null;
-
       for (let di = 0; di < sData.length; di++) {
-
-        let val, xIdx;
-
         if (!Array.isArray(sData[di]) || sData[di][1] == null) { prevPt = null; continue; }
-
-        val = sData[di][1]; xIdx = sData[di][0];
-
-        let ptPx;
-
-        ptPx = myChart.convertToPixel('grid', [xIdx, val]);
-
+        const val = sData[di][1]; const xIdx = sData[di][0];
+        const ptPx = myChart.convertToPixel('grid', [xIdx, val]);
         if (!ptPx) { prevPt = null; continue; }
-
         if (Math.abs(ptPx[0] - px) < THRESHOLD * 3 && Math.abs(ptPx[1] - py) < THRESHOLD) {
-
-          return { which: isP10 ? 'p10' : 'p90', dataIdx: di };
-
+          return { which, curveKey, dataIdx: di };
         }
-
         if (prevPt) {
-
           const dist = pointToSegmentDist(px, py, prevPt[0], prevPt[1], ptPx[0], ptPx[1]);
-
-          if (dist < THRESHOLD) {
-
-            return { which: isP10 ? 'p10' : 'p90', dataIdx: di };
-
-          }
-
+          if (dist < THRESHOLD) return { which, curveKey, dataIdx: di };
         }
-
         prevPt = ptPx;
-
       }
-
     }
-
     return null;
-
   }
-
-
 
   function pointToSegmentDist(px, py, x1, y1, x2, y2) {
-
     const dx = x2 - x1, dy = y2 - y1;
-
     const lenSq = dx * dx + dy * dy;
-
     if (lenSq === 0) return Math.hypot(px - x1, py - y1);
-
     let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
-
     t = Math.max(0, Math.min(1, t));
-
     return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
-
   }
-
-
-
-  /* Resolve the t value at a given pixel X position */
 
   function getTAtPixelX(pxX) {
-
-    /* Use convertFromPixel to get the data-space X, then map to t */
-
     let dataX;
-
     if (isDate) {
-
       const dp = myChart.convertFromPixel('grid', [pxX, 0]);
-
       if (!dp) return null;
-
-      const tsVal = dp[0]; // timestamp
-
-      /* Find the closest t value by matching date */
-
+      const tsVal = dp[0];
       let bestIdx = 0, bestDiff = Infinity;
-
       for (let i = 0; i < w.x.length; i++) {
-
         const ts = parseDateStr(w.x[i]);
-
         const d = Math.abs(ts - tsVal);
-
         if (d < bestDiff) { bestDiff = d; bestIdx = i; }
-
       }
-
-      /* Also check forecast dates */
-
       if (w.forecast && w.forecast.x) {
-
         for (let i = 0; i < w.forecast.x.length; i++) {
-
           const ts = parseDateStr(w.forecast.x[i]);
-
           const d = Math.abs(ts - tsVal);
-
-          if (d < bestDiff) { bestDiff = d; bestIdx = -1; /* use forecast t */ }
-
+          if (d < bestDiff) { bestDiff = d; bestIdx = -1; }
         }
-
         if (bestIdx === -1) {
-
-          /* Re-find in forecast */
-
           let bfi = 0, bfd = Infinity;
-
           for (let i = 0; i < w.forecast.x.length; i++) {
-
             const ts = parseDateStr(w.forecast.x[i]);
-
             const d = Math.abs(ts - tsVal);
-
             if (d < bfd) { bfd = d; bfi = i; }
-
           }
-
           if (w.forecast.t) return w.forecast.t[bfi];
-
         }
-
       }
-
       return w.t[bestIdx];
-
     } else {
-
       const dp = myChart.convertFromPixel('grid', [pxX, 0]);
-
       if (!dp) return null;
-
-      dataX = dp[0];  // data-space X value
-
-      /* Convert display-X back to t: t = x_display - x_min, and x[0] corresponds to t[0] */
-
-      /* For numeric mode, x_display = x_numeric, t = x_numeric - x_numeric.min() */
-
-      /* Since w.x[0] corresponds to t=0 (approximately), t ≈ dataX - w.x[0] */
-
-      /* But we have the actual t array, so find the closest */
-
+      dataX = dp[0];
       if (w.t.length === 0) return null;
-
       const approxT = dataX - w.x[0] + w.t[0];
-
       return Math.max(0, approxT);
-
     }
-
   }
-
-
 
   function onMouseDown(e) {
-
     const px = e.offsetX, py = e.offsetY;
-
     const hit = hitTestSeries(px, py);
-
     if (hit) {
-
-      dragging = hit.which;
-
+      dragging = hit;
       startPxY = py;
-
-      anchorDi = dragging === 'p10' ? ps.p10Di : ps.p90Di;
-
-      /* Determine the t value at the click position */
-
+      const ps = allPs[hit.curveKey];
+      anchorDi = hit.which === 'p10' ? ps.p10Di : ps.p90Di;
       const tVal = getTAtPixelX(px);
-
-      anchorT = (tVal != null && tVal > 0) ? tVal : 1;  // avoid t=0 (qi is fixed there)
-
+      anchorT = (tVal != null && tVal > 0) ? tVal : 1;
       myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
-
       e.event && e.event.preventDefault && e.event.preventDefault();
-
     }
-
   }
-
-
 
   function onMouseMove(e) {
-
     if (!dragging) {
-
       const hit = hitTestSeries(e.offsetX, e.offsetY);
-
       myChart.getDom().style.cursor = hit ? 'ns-resize' : '';
-
       return;
-
     }
-
     const py = e.offsetY;
+    const anchorXPx = isDate ? (() => {
+      let bestIdx = 0, bestDiff = Infinity;
+      for (let i = 0; i < w.t.length; i++) {
+        const d = Math.abs(w.t[i] - anchorT);
+        if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+      }
+      const ts = parseDateStr(w.x[bestIdx]);
+      const cp = myChart.convertToPixel('grid', [ts, 0]);
+      return cp ? cp[0] : e.offsetX;
+    })() : (() => {
+      const xVal = w.x[0] + anchorT - w.t[0];
+      const cp = myChart.convertToPixel('grid', [xVal, 0]);
+      return cp ? cp[0] : e.offsetX;
+    })();
 
-
-
-    /* Convert current mouse Y to data Y at the anchor's X pixel */
-
-    const anchorXPx = isDate
-
-      ? (() => {
-
-        /* Find pixel X for anchorT — find closest t in the data */
-
-        let bestIdx = 0, bestDiff = Infinity;
-
-        for (let i = 0; i < w.t.length; i++) {
-
-          const d = Math.abs(w.t[i] - anchorT);
-
-          if (d < bestDiff) { bestDiff = d; bestIdx = i; }
-
-        }
-
-        const ts = parseDateStr(w.x[bestIdx]);
-
-        const cp = myChart.convertToPixel('grid', [ts, 0]);
-
-        return cp ? cp[0] : e.offsetX;
-
-      })()
-
-      : (() => {
-
-        const xVal = w.x[0] + anchorT - w.t[0];
-
-        const cp = myChart.convertToPixel('grid', [xVal, 0]);
-
-        return cp ? cp[0] : e.offsetX;
-
-      })();
-
-
-
-    let newDataY;
-
-    if (isDate) {
-
-      const dp = myChart.convertFromPixel('grid', [anchorXPx, py]);
-
-      newDataY = dp ? dp[1] : 0;
-
-    } else {
-
-      const dp = myChart.convertFromPixel('grid', [anchorXPx, py]);
-
-      newDataY = dp ? dp[1] : 0;
-
-    }
-
+    const dp = myChart.convertFromPixel('grid', [anchorXPx, py]);
+    const newDataY = dp ? dp[1] : 0;
     if (newDataY <= 0) return;
 
+    const targetCurveKey = dragging.curveKey;
+    const ps = allPs[targetCurveKey];
+    if (!ps) return;
 
-
-    /* Solve for new D such that q(anchorT) = newDataY, keeping qi fixed */
-
-    const newDi = solveForDi(model, qi, bParam, anchorT, newDataY);
-
-    const diKey = dragging === 'p10' ? 'p10Di' : 'p90Di';
-
-    ps[diKey] = newDi;
-
-    updatePCurveSeries(cardId, myChart);
-
-    e.event && e.event.preventDefault && e.event.preventDefault();
-
-  }
-
-
-
-  function onMouseUp() {
-
-    if (dragging) {
-
-      dragging = null;
-
-      myChart.getDom().style.cursor = '';
-
+    let targetQi, targetB, targetModel;
+    if (targetCurveKey === 'main') {
+      targetQi = w.params.qi;
+      targetB = w.params.b;
+      targetModel = data.model || 'exponential';
+    } else {
+      const mfId = parseInt(targetCurveKey.replace('mf_', ''));
+      const fits = cardMultiFits[cardId] || [];
+      const mf = fits.find(f => f.id === mfId);
+      if (!mf || !mf.params) return;
+      targetQi = mf.params.qi;
+      targetB = mf.params.b;
+      targetModel = mf.model;
     }
 
+    const newDi = solveForDi(targetModel, targetQi, targetB, anchorT, newDataY);
+    const diKey = dragging.which === 'p10' ? 'p10Di' : 'p90Di';
+    ps[diKey] = newDi;
+
+    updatePCurveSeries(cardId, myChart, targetCurveKey);
+    e.event && e.event.preventDefault && e.event.preventDefault();
   }
 
-
+  function onMouseUp() {
+    if (dragging) {
+      dragging = null;
+      myChart.getDom().style.cursor = '';
+    }
+  }
 
   if (myChart.__pcurveDragCleanup) myChart.__pcurveDragCleanup();
 
-
-
   zr.on('mousedown', onMouseDown);
-
   zr.on('mousemove', onMouseMove);
-
   zr.on('mouseup', onMouseUp);
-
   zr.on('globalout', onMouseUp);
 
-
-
   myChart.__pcurveDragCleanup = () => {
-
     zr.off('mousedown', onMouseDown);
-
     zr.off('mousemove', onMouseMove);
-
     zr.off('mouseup', onMouseUp);
-
     zr.off('globalout', onMouseUp);
-
     delete myChart.__pcurveDragCleanup;
-
   };
-
 }
 
 
 
 /* Build P-curve data arrays for a given Di, using the model function */
-
 function buildPCurveData(w, data, diValue, isDate, categoryData) {
-
   const model = data.model || 'exponential';
-
   const qi = w.params.qi;
-
   const pParams = { qi: qi, di: diValue, b: w.params.b };
-
   const hasForecast = w.forecast && w.forecast.x && w.forecast.x.length > 0;
 
-
-
-  /* Find first/last non-null fitted indices (same region as P50) */
-
   let firstFit = -1, lastFit = -1;
-
   for (let i = 0; i < (w.y_fitted || []).length; i++) {
-
     if (w.y_fitted[i] != null) { if (firstFit === -1) firstFit = i; lastFit = i; }
-
   }
-
-
-
-  /* Both date and numeric modes now return [x, y] pair arrays */
 
   const pts = [];
-
-  /* Fitted region */
-
   for (let i = 0; i < w.t.length; i++) {
-
     if (w.y_fitted && w.y_fitted[i] != null) {
-
       const xVal = isDate ? parseDateStr(w.x[i]) : w.x[i];
-
       pts.push([xVal, evalDeclineModel(model, w.t[i], pParams)]);
-
     }
-
   }
-
-  /* Forecast region */
 
   if (hasForecast && w.forecast.t) {
-
-    /* Bridge from last fitted point */
-
     if (lastFit >= 0) {
-
       const lastX = isDate ? parseDateStr(w.x[lastFit]) : w.x[lastFit];
-
       if (pts.length === 0 || pts[pts.length - 1][0] !== lastX) {
-
         pts.push([lastX, evalDeclineModel(model, w.t[lastFit], pParams)]);
-
       }
-
     }
-
     for (let i = 0; i < w.forecast.t.length; i++) {
-
       const xVal = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
-
       pts.push([xVal, evalDeclineModel(model, w.forecast.t[i], pParams)]);
-
     }
-
   }
-
   return pts;
-
 }
 
-
-
-function updatePCurveSeries(cardId, myChart) {
-
-  const ps = cardPCurveState[cardId];
-
+function updatePCurveSeries(cardId, myChart, curveKeyOverride) {
+  const allPs = cardPCurveState[cardId] || {};
   const data = cardLastData[cardId];
-
-  if (!ps || !data || !data.wells) return;
-
+  if (!data || !data.wells) return;
   const w = data.wells[0];
-
   if (!w.y_fitted || !w.params || !w.t) return;
 
   const st = readCardStyles(cardId);
-
   const isDate = w.is_date || false;
 
-  const P10_COLOR = st.p10Color || '#22c55e', P90_COLOR = st.p90Color || '#ef4444';
-
-  const p10ShowLine = st.p10Line !== false, p10ShowMarker = st.p10Marker || false;
-
-  const p90ShowLine = st.p90Line !== false, p90ShowMarker = st.p90Marker || false;
-
-  const p10DiRound = Math.round(ps.p10Di * 1e6) / 1e6;
-
-  const p90DiRound = Math.round(ps.p90Di * 1e6) / 1e6;
-
-
-
   const opt = myChart.getOption();
-
   const seriesOpt = opt.series;
+  let p10Ys = [], p90Ys = []; // for DcaStats info
 
+  /* Update each P10/P90 series currently configured in option */
+  for (let si = 0; si < seriesOpt.length; si++) {
+    const s = seriesOpt[si];
+    if (!s.id) continue;
 
+    const parts = s.id.split('|');
+    if (parts.length < 2 || (parts[0] !== 'p10' && parts[0] !== 'p90')) continue;
 
-  let p10Idx = -1, p90Idx = -1;
+    const which = parts[0];
+    const curveKey = parts[1];
+    if (curveKeyOverride && curveKey !== curveKeyOverride) continue;
 
-  seriesOpt.forEach((s, i) => {
+    const ps = allPs[curveKey];
+    if (!ps || !ps.enabled) continue;
 
-    if (s.name && s.name.startsWith('P10')) p10Idx = i;
+    let lineObj = {};
+    let itemObj = {};
+    let targetName = '';
+    let pData = [];
+    const diVal = which === 'p10' ? ps.p10Di : ps.p90Di;
+    const diRound = Math.round(diVal * 1e6) / 1e6;
 
-    if (s.name && s.name.startsWith('P90')) p90Idx = i;
+    if (curveKey === 'main') {
+      const isSingle = data.wells.length === 1;
+      const prefix = isSingle ? '' : w.well + ' ';
+      targetName = prefix + (which === 'p10' ? 'P10' : 'P90') + ' (Di=' + diRound + ')';
+      pData = buildPCurveData(w, data, diVal, isDate, null);
 
-  });
+      const pColor = which === 'p10' ? (st.p10Color || '#22c55e') : (st.p90Color || '#ef4444');
+      const showLine = which === 'p10' ? (st.p10Line !== false) : (st.p90Line !== false);
+      const lineStyle = which === 'p10' ? (st.p10Style || 'solid') : (st.p90Style || 'solid');
 
-  if (p10Idx === -1 || p90Idx === -1) return;
+      lineObj = { color: pColor, width: showLine ? 1.5 : 0, type: lineStyle };
+      itemObj = { color: pColor };
+      s.showSymbol = which === 'p10' ? (st.p10Marker || false) : (st.p90Marker || false);
 
+      if (which === 'p10') p10Ys = pData.map(pt => pt[1]).filter(v => v != null && isFinite(v));
+      if (which === 'p90') p90Ys = pData.map(pt => pt[1]).filter(v => v != null && isFinite(v));
 
+    } else {
+      const mfId = parseInt(curveKey.replace('mf_', ''));
+      const mf = (cardMultiFits[cardId] || []).find(f => f.id === mfId);
+      if (!mf || !mf.params) continue;
 
-  const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, null);
-  const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
+      targetName = 'Curve #' + mf.id + ' (' + mf.model + ') ' + (which === 'p10' ? 'P10' : 'P90');
 
-  seriesOpt[p10Idx].data = p10Data;
-  seriesOpt[p10Idx].name = 'P10 (Di=' + p10DiRound + ')';
-  seriesOpt[p10Idx].lineStyle = { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: st.p10Style || 'solid' };
-  seriesOpt[p10Idx].itemStyle = { color: P10_COLOR };
-  seriesOpt[p10Idx].showSymbol = p10ShowMarker;
+      const pParams = Object.assign({}, mf.params, { di: diVal });
+      const idxMin = mf.indices ? Math.min(...mf.indices) : 0;
+      const idxMax = mf.indices ? Math.max(...mf.indices) : w.t.length - 1;
+      for (let i = idxMin; i <= Math.min(idxMax, w.t.length - 1); i++) {
+        const yVal = evalDeclineModel(mf.model, w.t[i], pParams);
+        pData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], yVal]);
+      }
 
-  seriesOpt[p90Idx].data = p90Data;
-  seriesOpt[p90Idx].name = 'P90 (Di=' + p90DiRound + ')';
-  seriesOpt[p90Idx].lineStyle = { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: st.p90Style || 'solid' };
-  seriesOpt[p90Idx].itemStyle = { color: P90_COLOR };
-  seriesOpt[p90Idx].showSymbol = p90ShowMarker;
+      lineObj = { color: mf.color, width: 1.5, type: 'dotted' };
+      itemObj = { color: mf.color, opacity: 0.6 };
+      s.showSymbol = false;
+    }
+
+    s.name = targetName;
+    s.data = pData;
+    s.lineStyle = lineObj;
+    s.itemStyle = itemObj;
+  }
 
   myChart.setOption({ series: seriesOpt }, false);
-
-  /* Live-update the % change graphic labels */
   updatePctChangeGraphic(cardId, myChart);
 
-  /* Update P10/P90 stats in dcaStatsDiv */
-  const dcaStatsDivU = document.getElementById('dcaStats-' + cardId);
-  if (dcaStatsDivU) {
-    const p10Ys = p10Data.map(pt => pt[1]).filter(v => v != null && isFinite(v));
-    const p90Ys = p90Data.map(pt => pt[1]).filter(v => v != null && isFinite(v));
-    function updateStatItems(prefix, vals) {
-      if (vals.length < 2) return;
-      const first = vals[0], last = vals[vals.length - 1];
-      const diff = last - first;
-      const pct = first !== 0 ? ((diff / Math.abs(first)) * 100) : 0;
-      const sign = diff >= 0 ? '+' : '';
-      const cls = diff >= 0 ? 'positive' : 'negative';
-      dcaStatsDivU.querySelectorAll('.dca-stat-item').forEach(el => {
-        const lbl = el.querySelector('.dca-stat-label');
-        const val = el.querySelector('.dca-stat-value');
-        if (!lbl || !val) return;
-        if (lbl.textContent === prefix + ' First') { val.textContent = first.toFixed(2); }
-        else if (lbl.textContent === prefix + ' Last') { val.textContent = last.toFixed(2); }
-        else if (lbl.textContent === prefix + ' Δ') {
-          val.textContent = sign + diff.toFixed(2);
-          val.className = 'dca-stat-value ' + cls;
-        } else if (lbl.textContent === prefix + ' %') {
-          val.textContent = sign + pct.toFixed(1) + '%';
-          val.className = 'dca-stat-value ' + cls;
-        }
-      });
+  /* Update P10/P90 stats in dcaStatsDiv IF ONLY main curve was updated (or everything) */
+  if (!curveKeyOverride || curveKeyOverride === 'main') {
+    const dcaStatsDivU = document.getElementById('dcaStats-' + cardId);
+    if (dcaStatsDivU && p10Ys.length > 0 && p90Ys.length > 0) {
+      function updateStatItems(prefix, vals) {
+        if (vals.length < 2) return;
+        const first = vals[0], last = vals[vals.length - 1];
+        const diff = last - first;
+        const pct = first !== 0 ? ((diff / Math.abs(first)) * 100) : 0;
+        const sign = diff >= 0 ? '+' : '';
+        const cls = diff >= 0 ? 'positive' : 'negative';
+        dcaStatsDivU.querySelectorAll('.dca-stat-item').forEach(el => {
+          const lbl = el.querySelector('.dca-stat-label');
+          const val = el.querySelector('.dca-stat-value');
+          if (!lbl || !val) return;
+          if (lbl.textContent === prefix + ' First') { val.textContent = first.toFixed(2); }
+          else if (lbl.textContent === prefix + ' Last') { val.textContent = last.toFixed(2); }
+          else if (lbl.textContent === prefix + ' Δ') {
+            val.textContent = sign + diff.toFixed(2);
+            val.className = 'dca-stat-value ' + cls;
+          } else if (lbl.textContent === prefix + ' %') {
+            val.textContent = sign + pct.toFixed(1) + '%';
+            val.className = 'dca-stat-value ' + cls;
+          }
+        });
+      }
+      updateStatItems('P10', p10Ys);
+      updateStatItems('P90', p90Ys);
     }
-    updateStatItems('P10', p10Ys);
-    updateStatItems('P90', p90Ys);
   }
 }
+
 
 
 
@@ -3580,43 +3348,27 @@ function setupQiDragHandle(cardId, myChart) {
 
       if (s.name.endsWith('Fitted')) {
 
-        /* Rebuild fitted data */
+        /* Rebuild combined fitted + forecast data */
 
-        seriesOpt[si].data = isDate
+        let combinedData = isDate
 
-          ? w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]])
+          ? w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]]).filter(p => p[1] != null)
 
-          : w.x.map((xv, i) => [xv, w.y_fitted[i]]);
+          : w.x.map((xv, i) => [xv, w.y_fitted[i]]).filter(p => p[1] != null);
 
-      }
+        if (w.forecast && w.forecast.x) {
 
-      if (s.name.endsWith('Forecast') && w.forecast && w.forecast.x) {
+          for (let i = 0; i < w.forecast.x.length; i++) {
 
-        /* Rebuild forecast data — include bridge point from last fitted to avoid gap */
+            const xv = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
 
-        const fData = [];
+            combinedData.push([xv, w.forecast.y[i]]);
 
-        let lfi = (w.y_fitted || []).length - 1;
-
-        while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--;
-
-        if (lfi >= 0) {
-
-          const bx = isDate ? parseDateStr(w.x[lfi]) : w.x[lfi];
-
-          fData.push([bx, w.y_fitted[lfi]]);
+          }
 
         }
 
-        for (let i = 0; i < w.forecast.x.length; i++) {
-
-          const xv = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
-
-          fData.push([xv, w.forecast.y[i]]);
-
-        }
-
-        seriesOpt[si].data = fData;
+        seriesOpt[si].data = combinedData;
 
       }
 
@@ -3626,9 +3378,7 @@ function setupQiDragHandle(cardId, myChart) {
 
     /* Update P10/P90 curves if enabled (they depend on qi) */
 
-    const ps = cardPCurveState[cardId];
-
-    if (ps && ps.enabled) updatePCurveSeries(cardId, myChart);
+    updatePCurveSeries(cardId, myChart, 'main');
 
     /* Live-update the % change graphic labels (P50 changed) */
     updatePctChangeGraphic(cardId, myChart);
@@ -3663,9 +3413,7 @@ function setupQiDragHandle(cardId, myChart) {
 
         otherChart.setOption({ series: seriesSync }, false);
 
-        const psSync = cardPCurveState[cardId];
-
-        if (psSync && psSync.enabled) updatePCurveSeries(cardId, otherChart);
+        updatePCurveSeries(cardId, otherChart, 'main');
 
       }
 
@@ -4257,8 +4005,9 @@ function renderSingleChart(cardId, data, forecastMonths) {
       }
 
       /* --- P10 / P90 stats --- */
-      const pcs = cardPCurveState[cardId];
-      if (pcs && sw.params && sw.t) {
+      /* Use main P-curve settings if available */
+      const pcs = (cardPCurveState[cardId] || {})['main'];
+      if (pcs && pcs.enabled && sw.t) {
         const isDateStat = firstW.is_date || false;
         const p10Pts = buildPCurveData(sw, data, pcs.p10Di, isDateStat, null);
         const p90Pts = buildPCurveData(sw, data, pcs.p90Di, isDateStat, null);
@@ -4421,7 +4170,17 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       if (isSingle && anchorD.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD, z: 10 });
 
-      if (w.y_fitted) {
+      if (w.y_fitted || hasForecast) {
+
+        /* Build combined fitted + forecast data as a single series */
+        let combinedData = [];
+        if (w.y_fitted) {
+          combinedData = w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]]).filter(p => p[1] != null);
+        }
+        if (hasForecast) {
+          /* Append forecast points (bridge is automatic since fitted ends where forecast begins) */
+          w.forecast.x.forEach((xv, i) => combinedData.push([parseDateStr(xv), w.forecast.y[i]]));
+        }
 
         series.push({
           name: prefix + 'Fitted',
@@ -4432,36 +4191,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
           itemStyle: { color: wFitColor },
-          data: w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]]).filter(p => p[1] != null)
-        });
-
-      }
-
-      if (hasForecast) {
-
-        const bridgeArr = [];
-
-        if (w.y_fitted && w.y_fitted.length > 0 && w.x.length > 0) {
-
-          let lfi = w.y_fitted.length - 1;
-
-          while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--;
-
-          if (lfi >= 0) bridgeArr.push({ value: [parseDateStr(w.x[lfi]), w.y_fitted[lfi]], symbol: 'none' });
-
-        }
-
-        series.push({
-          name: prefix + 'Forecast',
-          type: 'line',
-          showSymbol: st.forecastMarkers,
-          symbol: st.forecastSymbol,
-          symbolSize: st.forecastSymbolSize,
-          smooth: false,
-          lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth },
-          itemStyle: { color: wFcColor },
-          label: st.forecastLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
-          data: [...bridgeArr, ...w.forecast.x.map((xv, i) => [parseDateStr(xv), w.forecast.y[i]])]
+          data: combinedData
         });
 
       }
@@ -4480,7 +4210,16 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       if (isSingle && anchorD2.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD2, z: 10 });
 
-      if (w.y_fitted) {
+      if (w.y_fitted || hasForecast) {
+        /* Build combined fitted + forecast data as a single series */
+        let combinedData = [];
+        if (w.y_fitted) {
+          combinedData = w.x.map((xv, i) => [xv, w.y_fitted[i]]).filter(p => p[1] != null);
+        }
+        if (hasForecast) {
+          w.forecast.x.forEach((xv, i) => combinedData.push([xv, w.forecast.y[i]]));
+        }
+
         series.push({
           name: prefix + 'Fitted',
           type: 'line',
@@ -4490,23 +4229,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
           itemStyle: { color: wFitColor },
-          data: w.x.map((xv, i) => [xv, w.y_fitted[i]]).filter(p => p[1] != null)
+          data: combinedData
         });
-      }
-
-      if (hasForecast) {
-
-        const bridgeArr = [];
-
-        if (w.y_fitted && w.y_fitted.length > 0 && w.x.length > 0) { let lfi = w.y_fitted.length - 1; while (lfi >= 0 && w.y_fitted[lfi] == null) lfi--; if (lfi >= 0) bridgeArr.push({ value: [w.x[lfi], w.y_fitted[lfi]], symbol: 'none' }); }
-
-        series.push({
-          name: prefix + 'Forecast', type: 'line', showSymbol: st.forecastMarkers, symbol: st.forecastSymbol, symbolSize: st.forecastSymbolSize, smooth: false,
-          lineStyle: { type: st.forecastStyle, color: wFcColor, width: st.forecastWidth }, itemStyle: { color: wFcColor },
-          label: st.forecastLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
-          data: [...bridgeArr, ...w.forecast.x.map((xv, i) => [xv, w.forecast.y[i]])]
-        });
-
       }
 
     }
@@ -4515,7 +4239,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     /* ---- P10 / P90 decline curves (physics-based, drag recalculates D) ---- */
 
-    const ps = cardPCurveState[cardId];
+    const ps = (cardPCurveState[cardId] || {})['main'];
 
     if (ps && ps.enabled && w.y_fitted && w.params && w.t) {
 
@@ -4530,6 +4254,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
       const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
 
       series.push({
+        id: 'p10|main',
         name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
         lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: st.p10Style || 'solid' }, itemStyle: { color: P10_COLOR },
         label: st.p10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
@@ -4537,6 +4262,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
       });
 
       series.push({
+        id: 'p90|main',
         name: prefix + 'P90 (Di=' + p90DiRound + ')', type: 'line', z: 1, showSymbol: p90ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
         lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: st.p90Style || 'solid' }, itemStyle: { color: P90_COLOR },
         label: st.p90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
@@ -4666,7 +4392,17 @@ function renderSingleChart(cardId, data, forecastMonths) {
   if (multiFits && multiFits.length > 0) {
     multiFits.forEach((mf, mfIdx) => {
       const mfName = 'Curve #' + mf.id + ' (' + mf.model + ')';
-      if (mf.fittedData && mf.fittedData.length > 0) {
+      /* Combine fitted + forecast into a single series */
+      let mfCombined = [];
+      if (mf.fittedData && mf.fittedData.length > 0) mfCombined = [...mf.fittedData];
+      if (mf.forecastData && mf.forecastData.length > 0) {
+        /* forecastData may already have bridge point (first element = last fitted), skip duplicate */
+        const startIdx = (mfCombined.length > 0 && mf.forecastData.length > 0 &&
+          mf.forecastData[0][0] === mfCombined[mfCombined.length - 1][0] &&
+          mf.forecastData[0][1] === mfCombined[mfCombined.length - 1][1]) ? 1 : 0;
+        for (let fi = startIdx; fi < mf.forecastData.length; fi++) mfCombined.push(mf.forecastData[fi]);
+      }
+      if (mfCombined.length > 0) {
         series.push({
           name: mfName,
           type: 'line',
@@ -4674,21 +4410,57 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { color: mf.color, width: 2.5, type: 'solid' },
           itemStyle: { color: mf.color },
-          data: mf.fittedData,
+          data: mfCombined,
           z: 5,
         });
       }
-      if (mf.forecastData && mf.forecastData.length > 0) {
-        series.push({
-          name: mfName + ' Forecast',
-          type: 'line',
-          showSymbol: false,
-          smooth: false,
-          lineStyle: { color: mf.color, width: 2, type: 'dashed' },
-          itemStyle: { color: mf.color },
-          data: mf.forecastData,
-          z: 5,
-        });
+
+      /* P10/P90 for this multi-fit curve (if enabled on the card) */
+      const mfPs = (cardPCurveState[cardId] || {})['mf_' + mf.id];
+      if (mfPs && mfPs.enabled && mf.params) {
+        const mfW = allWellsData[0];
+        if (mfW && mfW.t) {
+          const mfP10Di = mfPs.p10Di;
+          const mfP90Di = mfPs.p90Di;
+          const makeMultiFitPCurve = (diVal) => {
+            const pParams = Object.assign({}, mf.params, { di: diVal });
+            const pData = [];
+            /* Evaluate over selected indices range */
+            const idxMin = mf.indices ? Math.min(...mf.indices) : 0;
+            const idxMax = mf.indices ? Math.max(...mf.indices) : mfW.t.length - 1;
+            for (let i = idxMin; i <= Math.min(idxMax, mfW.t.length - 1); i++) {
+              const yVal = evalDeclineModel(mf.model, mfW.t[i], pParams);
+              if (isDate) {
+                pData.push([parseDateStr(mfW.x[i]), yVal]);
+              } else {
+                pData.push([mfW.x[i], yVal]);
+              }
+            }
+            return pData;
+          };
+          const mfP10Data = makeMultiFitPCurve(mfP10Di);
+          const mfP90Data = makeMultiFitPCurve(mfP90Di);
+          if (mfP10Data.length > 0) {
+            series.push({
+              id: 'p10|mf_' + mf.id,
+              name: mfName + ' P10',
+              type: 'line', z: 1, showSymbol: false, smooth: false,
+              lineStyle: { color: mf.color, width: 1.5, type: 'dotted' },
+              itemStyle: { color: mf.color, opacity: 0.6 },
+              data: mfP10Data,
+            });
+          }
+          if (mfP90Data.length > 0) {
+            series.push({
+              id: 'p90|mf_' + mf.id,
+              name: mfName + ' P90',
+              type: 'line', z: 1, showSymbol: false, smooth: false,
+              lineStyle: { color: mf.color, width: 1.5, type: 'dotted' },
+              itemStyle: { color: mf.color, opacity: 0.6 },
+              data: mfP90Data,
+            });
+          }
+        }
       }
     });
   }
@@ -4951,13 +4723,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
   setupLegendColorPicker(cardId, myChart);
 
   /* Setup legend right-click → remove series context menu */
-  myChart.on('contextmenu', function(params) {
+  myChart.on('contextmenu', function (params) {
     if (params.componentType !== 'legend') return;
     const nativeEvt = params.event && params.event.event;
     if (nativeEvt) nativeEvt.preventDefault();
     const rect = chartDiv.getBoundingClientRect();
     const cx = nativeEvt ? nativeEvt.clientX : (rect.left + (params.event ? params.event.offsetX || 0 : 0));
-    const cy = nativeEvt ? nativeEvt.clientY : (rect.top  + (params.event ? params.event.offsetY || 0 : 0));
+    const cy = nativeEvt ? nativeEvt.clientY : (rect.top + (params.event ? params.event.offsetY || 0 : 0));
     showLegendContextMenu(cardId, params.name, cx, cy);
   });
 
@@ -5642,13 +5414,30 @@ async function _performMultiFit(cardId, indices) {
   }
 }
 
-/* Remove a specific multi-fit curve */
-function removeMultiFit(cardId, fitId) {
-  const fits = cardMultiFits[cardId];
-  if (!fits) return;
-  const idx = fits.findIndex(f => f.id === fitId);
-  if (idx >= 0) fits.splice(idx, 1);
-  if (fits.length === 0) delete cardMultiFits[cardId];
+/* Remove a specific curve */
+function removeCurve(cardId, type, id) {
+  if (type === 'multi') {
+    const fits = cardMultiFits[cardId];
+    if (fits) {
+      const idx = fits.findIndex(f => f.id === parseInt(id));
+      if (idx >= 0) fits.splice(idx, 1);
+      if (fits.length === 0) delete cardMultiFits[cardId];
+    }
+    if (cardPCurveState[cardId]) {
+      delete cardPCurveState[cardId]['mf_' + id];
+    }
+  } else if (type === 'main') {
+    const data = cardLastData[cardId];
+    if (data && data.wells) {
+      data.wells.forEach(w => {
+        delete w.y_fitted;
+        delete w.params;
+        delete w.forecast;
+        delete w.qi_anchor_indices;
+      });
+    }
+    if (cardPCurveState[cardId]) delete cardPCurveState[cardId]['main'];
+  }
 
   const data = cardLastData[cardId];
   const card = document.getElementById(cardId);
@@ -5664,6 +5453,11 @@ function removeMultiFit(cardId, fitId) {
 /* Clear all multi-fit curves */
 function clearAllMultiFits(cardId) {
   delete cardMultiFits[cardId];
+  if (cardPCurveState[cardId]) {
+    for (const key of Object.keys(cardPCurveState[cardId])) {
+      if (key.startsWith('mf_')) delete cardPCurveState[cardId][key];
+    }
+  }
   const data = cardLastData[cardId];
   const card = document.getElementById(cardId);
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
@@ -5675,35 +5469,180 @@ function clearAllMultiFits(cardId) {
   if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
 }
 
-/* Update the multi-fit management panel */
+/* Update the multi-fit management panel — shows ALL curves (main + additional) */
 function updateMultiFitPanel(cardId) {
   const panel = document.getElementById('multiFitPanel-' + cardId);
   if (!panel) return;
 
-  const fits = cardMultiFits[cardId];
-  if (!fits || fits.length === 0) {
+  const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
+  const fits = cardMultiFits[cardId] || [];
+  const lastData = cardLastData[cardId];
+  const allWells = lastData?.wells || [];
+  const hiddenSet = cardHiddenSeries[cardId] || new Set();
+  const pcs = cardPCurveState[cardId] || {};
+
+  /* Collect all curve entries */
+  const allCurves = [];
+
+  /* Main fitted curves (one per well) */
+  allWells.forEach((w, wIdx) => {
+    const isSingle = allWells.length === 1;
+    const prefix = isSingle ? '' : w.well + ' ';
+    const fittedName = prefix + 'Fitted';
+    if (w.y_fitted || (w.forecast && w.forecast.x && w.forecast.x.length > 0)) {
+      const st = cardStyles[cardId] || getDefaultStyle();
+      const wellColors = getPlotThemePalette(st.plotTheme);
+      const fitColor = isSingle ? st.fittedColor : wellColors[wIdx % wellColors.length];
+      const params = w.params || {};
+      const model = lastData?.model || 'exponential';
+
+      /* Sub-series names for this main curve (fitted + P10 + P90) */
+      const ps = pcs['main'];
+      const subSeries = [fittedName];
+      if (ps && ps.enabled && w.params && w.t) {
+        const p10DiRound = Math.round(ps.p10Di * 1e6) / 1e6;
+        const p90DiRound = Math.round(ps.p90Di * 1e6) / 1e6;
+        subSeries.push(prefix + 'P10 (Di=' + p10DiRound + ')');
+        subSeries.push(prefix + 'P90 (Di=' + p90DiRound + ')');
+      }
+      const isHidden = subSeries.some(n => hiddenSet.has(n));
+      allCurves.push({
+        type: 'main',
+        id: '',
+        name: fittedName,
+        label: (prefix || '') + 'Main Fit',
+        model: model,
+        params: params,
+        color: fitColor,
+        subSeries: subSeries,
+        isHidden: isHidden,
+      });
+    }
+  });
+
+  /* Additional multi-fit curves */
+  fits.forEach(f => {
+    const mfName = 'Curve #' + f.id + ' (' + f.model + ')';
+    const ps = pcs['mf_' + f.id];
+    const subSeries = [mfName];
+    if (ps && ps.enabled && f.params) {
+      subSeries.push(mfName + ' P10');
+      subSeries.push(mfName + ' P90');
+    }
+    const isHidden = subSeries.some(n => hiddenSet.has(n));
+    allCurves.push({
+      type: 'multi',
+      id: f.id,
+      name: mfName,
+      label: 'Curve #' + f.id,
+      model: f.model,
+      params: f.params,
+      color: f.color,
+      subSeries: subSeries,
+      isHidden: isHidden,
+    });
+  });
+
+  if (allCurves.length === 0) {
     panel.style.display = 'none';
     panel.innerHTML = '';
     return;
   }
 
-  const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
+  let html = '<div class="mf-header"><span class="mf-title">All Curves (' + allCurves.length + ')</span>'
+    + '<button class="mf-clear-all" onclick="clearAllCurvesFromPanel(\'' + cardId + '\')" title="Remove all curves from plot">Clear All</button></div>';
 
-  let html = '<div class="mf-header"><span class="mf-title">Additional Curves (' + fits.length + ')</span>'
-    + '<button class="mf-clear-all" onclick="clearAllMultiFits(\'' + cardId + '\')" title="Remove all additional curves">Clear All</button></div>';
+  allCurves.forEach(c => {
+    const paramStr = Object.entries(c.params).map(([k, v]) => k + '=' + fmt(v)).join(', ');
+    const hiddenCls = c.isHidden ? ' mf-item-hidden' : '';
+    const eyeIcon = c.isHidden ? '👁️‍🗨️' : '';
+    let actionsHtml = '';
 
-  fits.forEach(f => {
-    const paramStr = Object.entries(f.params).map(([k, v]) => k + '=' + fmt(v)).join(', ');
-    html += '<div class="mf-item">'
-      + '<span class="mf-color-dot" style="background:' + f.color + ';"></span>'
-      + '<span class="mf-label">Curve #' + f.id + ' <span class="mf-model">' + f.model + '</span></span>'
+    if (c.isHidden) {
+      actionsHtml = '<button class="mf-restore" onclick="restoreCurveInPanel(\'' + cardId + '\', ' + JSON.stringify(c.subSeries).replace(/'/g, "\\'").replace(/"/g, '&quot;') + ')" title="Show this curve">Show</button>';
+    } else {
+      /* P10/P90 toggle per curve */
+      const cKey = c.type === 'main' ? 'main' : 'mf_' + c.id;
+      const isPEnabled = pcs[cKey] && pcs[cKey].enabled;
+      const pColor = isPEnabled ? 'color: var(--accent); border-color: var(--accent); font-weight: 500;' : '';
+      actionsHtml += '<button class="mf-pcurve" style="' + pColor + '" onclick="toggleCurvePCurves(\'' + cardId + '\', \'' + c.type + '\', \'' + c.id + '\')" title="Toggle P10/P90">± P10/P90</button>';
+
+      actionsHtml += '<button class="mf-remove" onclick="removeCurve(\'' + cardId + '\', \'' + c.type + '\', \'' + c.id + '\')" title="Delete this curve permanently">&times;</button>';
+      actionsHtml += '<button class="mf-hide" onclick="hideCurveFromPanel(\'' + cardId + '\', ' + JSON.stringify(c.subSeries).replace(/'/g, "\\'").replace(/"/g, '&quot;') + ')" title="Hide this curve from plot">Hide</button>';
+    }
+
+    html += '<div class="mf-item' + hiddenCls + '">'
+      + '<span class="mf-color-dot" style="background:' + c.color + ';"></span>'
+      + '<span class="mf-label">' + eyeIcon + c.label + ' <span class="mf-model">' + c.model + '</span></span>'
       + '<span class="mf-params">' + paramStr + '</span>'
-      + '<button class="mf-remove" onclick="removeMultiFit(\'' + cardId + '\',' + f.id + ')" title="Remove this curve">&times;</button>'
+      + actionsHtml
       + '</div>';
   });
 
   panel.innerHTML = html;
   panel.style.display = 'block';
+}
+
+/* Hide a curve (and its sub-series like P10/P90) from the plot */
+function hideCurveFromPanel(cardId, subSeriesJson) {
+  const subSeries = typeof subSeriesJson === 'string' ? JSON.parse(subSeriesJson) : subSeriesJson;
+  if (!cardHiddenSeries[cardId]) cardHiddenSeries[cardId] = new Set();
+  subSeries.forEach(n => cardHiddenSeries[cardId].add(n));
+
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  const lastData = cardLastData[cardId];
+  if (lastData) {
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+  }
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Restore (show) a hidden curve back on the plot */
+function restoreCurveInPanel(cardId, subSeriesJson) {
+  const subSeries = typeof subSeriesJson === 'string' ? JSON.parse(subSeriesJson) : subSeriesJson;
+  const hidden = cardHiddenSeries[cardId];
+  if (hidden) {
+    subSeries.forEach(n => hidden.delete(n));
+    if (hidden.size === 0) delete cardHiddenSeries[cardId];
+  }
+
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  const lastData = cardLastData[cardId];
+  if (lastData) {
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+  }
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Clear all curves (wipe main, delete multi-fit) */
+function clearAllCurvesFromPanel(cardId) {
+  /* Delete all multi-fit curves */
+  delete cardMultiFits[cardId];
+  delete cardPCurveState[cardId];
+  
+  /* Perm-delete the main fitted curve */
+  const lastData = cardLastData[cardId];
+  if (lastData && lastData.wells) {
+    lastData.wells.forEach(w => {
+      delete w.y_fitted;
+      delete w.params;
+      delete w.forecast;
+      delete w.qi_anchor_indices;
+    });
+  }
+
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  if (lastData) {
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+  }
+  updateMultiFitPanel(cardId);
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
 }
 
 
@@ -5733,10 +5672,10 @@ function showLegendContextMenu(cardId, seriesName, clientX, clientY) {
 
   /* Position: keep inside viewport */
   const menuW = 200, menuH = 80;
-  const left = Math.min(clientX, window.innerWidth  - menuW - 8);
-  const top  = Math.min(clientY, window.innerHeight - menuH - 8);
+  const left = Math.min(clientX, window.innerWidth - menuW - 8);
+  const top = Math.min(clientY, window.innerHeight - menuH - 8);
   menu.style.left = left + 'px';
-  menu.style.top  = top  + 'px';
+  menu.style.top = top + 'px';
   menu.style.display = 'block';
 
   setTimeout(() => {
@@ -5769,7 +5708,11 @@ function removeLegendSeries(cardId, seriesName) {
   /* Multi-fit curves: extract id and call proper removal */
   const mfMatch = seriesName.match(/^Curve #(\d+) \(/);
   if (mfMatch) {
-    removeMultiFit(cardId, parseInt(mfMatch[1]));
+    removeCurve(cardId, 'multi', parseInt(mfMatch[1]));
+    return;
+  }
+  if (seriesName.endsWith('Fitted')) {
+    removeCurve(cardId, 'main', '');
     return;
   }
 
@@ -6308,13 +6251,13 @@ function showAnchorPointMenu(cardId, idx, clientX, clientY) {
 
   const menu = document.getElementById('anchorPointMenu');
   menu.style.left = clientX + 'px';
-  menu.style.top  = clientY + 'px';
+  menu.style.top = clientY + 'px';
   menu.style.display = 'block';
 
   requestAnimationFrame(() => {
     const mr = menu.getBoundingClientRect();
-    if (mr.right  > window.innerWidth)  menu.style.left = (clientX - mr.width)  + 'px';
-    if (mr.bottom > window.innerHeight) menu.style.top  = (clientY - mr.height) + 'px';
+    if (mr.right > window.innerWidth) menu.style.left = (clientX - mr.width) + 'px';
+    if (mr.bottom > window.innerHeight) menu.style.top = (clientY - mr.height) + 'px';
   });
 }
 
@@ -6389,10 +6332,10 @@ async function anchorRemovePoint() {
 
 /* Wire up anchor menu buttons (script runs after DOM, no need for DOMContentLoaded) */
 (function () {
-  const exclBtn   = document.getElementById('anchorExclBtn');
+  const exclBtn = document.getElementById('anchorExclBtn');
   const removeBtn = document.getElementById('anchorRemoveBtn');
-  if (exclBtn)   exclBtn.addEventListener('click',   anchorToggleExclude);
-  if (removeBtn) removeBtn.addEventListener('click',  anchorRemovePoint);
+  if (exclBtn) exclBtn.addEventListener('click', anchorToggleExclude);
+  if (removeBtn) removeBtn.addEventListener('click', anchorRemovePoint);
 })();
 
 /* ---- Regular data-point popup menu ---- */
@@ -6409,13 +6352,13 @@ function showPointMenu(cardId, idx, clientX, clientY) {
 
   const menu = document.getElementById('pointMenu');
   menu.style.left = clientX + 'px';
-  menu.style.top  = clientY + 'px';
+  menu.style.top = clientY + 'px';
   menu.style.display = 'block';
 
   requestAnimationFrame(() => {
     const mr = menu.getBoundingClientRect();
-    if (mr.right  > window.innerWidth)  menu.style.left = (clientX - mr.width)  + 'px';
-    if (mr.bottom > window.innerHeight) menu.style.top  = (clientY - mr.height) + 'px';
+    if (mr.right > window.innerWidth) menu.style.left = (clientX - mr.width) + 'px';
+    if (mr.bottom > window.innerHeight) menu.style.top = (clientY - mr.height) + 'px';
   });
 }
 
@@ -6520,7 +6463,7 @@ function addBoxPointsToCtrlSelection(cardId, chart, selRect) {
     const ptPx = chart.convertToPixel('grid', [xVal, yVal]);
     if (!ptPx || isNaN(ptPx[0]) || isNaN(ptPx[1])) continue;
     if (ptPx[0] >= selRect.x1 && ptPx[0] <= selRect.x2 &&
-        ptPx[1] >= selRect.y1 && ptPx[1] <= selRect.y2) {
+      ptPx[1] >= selRect.y1 && ptPx[1] <= selRect.y2) {
       sel.add(i);
     }
   }
@@ -6592,13 +6535,13 @@ function showMultiPointMenu(clientX, clientY, cardId) {
   const menu = document.getElementById('multiPointMenu');
   menu.dataset.cardId = cardId;
   menu.style.left = clientX + 'px';
-  menu.style.top  = clientY + 'px';
+  menu.style.top = clientY + 'px';
   menu.style.display = 'block';
 
   requestAnimationFrame(function () {
     const mr = menu.getBoundingClientRect();
-    if (mr.right  > window.innerWidth)  menu.style.left = (clientX - mr.width)  + 'px';
-    if (mr.bottom > window.innerHeight) menu.style.top  = (clientY - mr.height) + 'px';
+    if (mr.right > window.innerWidth) menu.style.left = (clientX - mr.width) + 'px';
+    if (mr.bottom > window.innerHeight) menu.style.top = (clientY - mr.height) + 'px';
   });
 }
 
