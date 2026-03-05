@@ -1276,6 +1276,88 @@ button.btn-sm {
   font-style: italic;
 }
 
+/* --- Multi-Fit Curve Management Panel --- */
+.multi-fit-panel {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: .78rem;
+}
+.mf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.mf-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: .8rem;
+}
+.mf-clear-all {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: .7rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.mf-clear-all:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+.mf-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mf-item:last-child {
+  border-bottom: none;
+}
+.mf-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mf-label {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.mf-model {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: .72rem;
+}
+.mf-params {
+  color: var(--text-dim);
+  font-size: .72rem;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mf-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color .15s;
+}
+.mf-remove:hover {
+  color: #ef4444;
+}
+
 /* --- Card Wrapper & Section Header --- */
 .card-wrap {
   position: relative;
@@ -3215,4 +3297,317 @@ button.btn-sm {
   background: rgba(239, 68, 68, .12);
   color: #ef4444;
   border-color: rgba(239, 68, 68, .25);
+}
+
+/* ── DCA Layout & Template Sidebar ── */
+.dca-layout {
+  display: flex;
+  gap: 0;
+  min-height: calc(100vh - 140px);
+}
+.dca-main {
+  flex: 1;
+  min-width: 0;
+}
+.dca-sidebar {
+  width: 320px;
+  min-width: 320px;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transition: margin-right .25s ease, opacity .2s ease;
+  overflow: hidden;
+  margin-right: 0;
+}
+.dca-sidebar.collapsed {
+  margin-right: -320px;
+  opacity: 0;
+  pointer-events: none;
+}
+.dca-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(59, 130, 246, .04);
+  flex-shrink: 0;
+}
+.dca-sidebar-title {
+  font-weight: 700;
+  font-size: .88rem;
+  color: var(--text);
+  letter-spacing: -.02em;
+}
+.dca-sidebar-close {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all .15s;
+}
+.dca-sidebar-close:hover {
+  background: rgba(239, 68, 68, .1);
+  color: #ef4444;
+}
+.dca-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+.dca-sidebar-toggle {
+  position: fixed;
+  right: 16px;
+  top: 110px;
+  z-index: 100;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,.12);
+  transition: all .2s;
+}
+.dca-sidebar-toggle:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  transform: scale(1.05);
+}
+.dca-sidebar-toggle.hidden {
+  display: none;
+}
+
+/* Template empty state */
+.dca-tpl-empty {
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: .82rem;
+  line-height: 1.6;
+}
+
+/* Template item card */
+.dca-tpl-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background .15s;
+  position: relative;
+}
+.dca-tpl-item:hover {
+  background: rgba(59, 130, 246, .04);
+}
+.dca-tpl-item:last-child {
+  border-bottom: none;
+}
+.dca-tpl-name {
+  font-weight: 600;
+  font-size: .84rem;
+  color: var(--text);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dca-tpl-name-input {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text);
+  font-weight: 600;
+  font-size: .84rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  width: 100%;
+  max-width: 200px;
+  outline: none;
+  transition: border-color .15s;
+}
+.dca-tpl-name-input:hover,
+.dca-tpl-name-input:focus {
+  border-color: var(--border);
+  background: var(--bg-input);
+}
+.dca-tpl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+}
+.dca-tpl-tag {
+  font-size: .7rem;
+  color: var(--text-dim);
+  background: rgba(100, 116, 139, .08);
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.dca-tpl-tag.model {
+  background: rgba(59, 130, 246, .1);
+  color: #3b82f6;
+}
+.dca-tpl-tag.well {
+  background: rgba(34, 197, 94, .1);
+  color: #22c55e;
+}
+.dca-tpl-tag.pcurve {
+  background: rgba(245, 158, 11, .1);
+  color: #f59e0b;
+}
+.dca-tpl-params {
+  font-size: .72rem;
+  color: var(--text-dim);
+  font-family: 'Fira Code', 'Consolas', monospace;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.dca-tpl-actions {
+  display: flex;
+  gap: 6px;
+}
+.dca-tpl-actions button {
+  padding: 4px 10px;
+  font-size: .72rem;
+  font-weight: 600;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  transition: all .15s;
+}
+.dca-tpl-actions button:hover {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, .08);
+}
+.dca-tpl-actions .tpl-apply-btn {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.dca-tpl-actions .tpl-apply-btn:hover {
+  filter: brightness(1.1);
+}
+.dca-tpl-actions .tpl-delete-btn {
+  color: var(--text-dim);
+}
+.dca-tpl-actions .tpl-delete-btn:hover {
+  background: rgba(239, 68, 68, .1);
+  color: #ef4444;
+  border-color: #ef4444;
+}
+.dca-tpl-date {
+  font-size: .66rem;
+  color: var(--text-dim);
+  opacity: .7;
+  position: absolute;
+  top: 10px;
+  right: 14px;
+}
+.dca-tpl-equation {
+  font-size: .72rem;
+  color: var(--accent);
+  font-family: 'Fira Code', 'Consolas', monospace;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Legend Right-Click Context Menu ── */
+.legend-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 190px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.22);
+  overflow: hidden;
+  font-size: .82rem;
+  color: var(--text);
+  animation: lcmFadeIn .1s ease;
+}
+@keyframes lcmFadeIn {
+  from { opacity:0; transform:scale(.95); }
+  to   { opacity:1; transform:scale(1); }
+}
+.lcm-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 13px 7px;
+  font-size: .75rem;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.lcm-icon {
+  font-size: .9rem;
+  opacity: .6;
+}
+.lcm-series-name {
+  font-weight: 600;
+  color: var(--text);
+  font-size: .8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 155px;
+}
+.lcm-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0 10px;
+}
+.lcm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: background .12s;
+  user-select: none;
+}
+.lcm-item:hover {
+  background: rgba(100,116,139,.08);
+}
+.lcm-item-icon {
+  font-size: .8rem;
+  width: 16px;
+  text-align: center;
+}
+.lcm-remove {
+  color: var(--red, #ef4444);
+}
+.lcm-remove:hover {
+  background: rgba(239,68,68,.1);
+}
+
+/* ── Restore Hidden series toolbar button ── */
+.restore-hidden-btn {
+  font-size: .78rem;
+  padding: 3px 10px;
+  background: rgba(245,158,11,.12);
+  border: 1px solid rgba(245,158,11,.3);
+  color: #f59e0b;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.restore-hidden-btn:hover {
+  background: rgba(245,158,11,.22);
+  border-color: #f59e0b;
 }

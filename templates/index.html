@@ -200,12 +200,28 @@
 
   <!-- TAB 3: DCA -->
   <div id="tab-dca" class="tab-content">
-    <div class="page-bar" id="pageBar">
-      <div class="page-tabs" id="pageTabs"></div>
-      <button class="page-add" onclick="addPagePrompt()" title="New Page">+</button>
+    <div class="dca-layout">
+      <div class="dca-main">
+        <div class="page-bar" id="pageBar">
+          <div class="page-tabs" id="pageTabs"></div>
+          <button class="page-add" onclick="addPagePrompt()" title="New Page">+</button>
+        </div>
+        <div id="plotsContainer"></div>
+        <div class="add-plot-btn" onclick="addPlotCardToActive()"><span>+ Add Well Forecast</span></div>
+      </div>
+      <div class="dca-sidebar" id="dcaSidebar">
+        <div class="dca-sidebar-header">
+          <span class="dca-sidebar-title">📋 DCA Templates</span>
+          <button class="dca-sidebar-close" onclick="toggleDcaSidebar()" title="Close sidebar">&times;</button>
+        </div>
+        <div class="dca-sidebar-content" id="dcaSidebarContent">
+          <div class="dca-tpl-empty">No templates saved yet.<br><span style="font-size:.72rem;opacity:.6;">Use the 💾 button on any card to save a template.</span></div>
+        </div>
+      </div>
     </div>
-    <div id="plotsContainer"></div>
-    <div class="add-plot-btn" onclick="addPlotCardToActive()"><span>+ Add Well Forecast</span></div>
+    <button class="dca-sidebar-toggle" id="dcaSidebarToggle" onclick="toggleDcaSidebar()" title="DCA Templates">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    </button>
   </div>
 
   <!-- Zoom context menu -->
@@ -215,6 +231,7 @@
     <div class="zoom-menu-item" data-action="y">Zoom Y Axis Only</div>
     <div class="zoom-menu-divider"></div>
     <div class="zoom-menu-item" data-action="fitsel">Fit Curve to Selection</div>
+    <div class="zoom-menu-item" data-action="addfit" style="color:var(--accent,#e040fb);">➕ Add Curve Fit</div>
     <div class="zoom-menu-item" data-action="exclsel">Exclude Selection</div>
     <div class="zoom-menu-divider"></div>
     <div class="zoom-menu-item" data-action="reset">Reset Zoom</div>
@@ -376,7 +393,31 @@
     <div class="ccm-item" id="pointMenuExclBtn"><span class="ccm-icon">⊘</span> <span id="pointMenuExclLabel">Exclude from fitting</span></div>
   </div>
 
-  <script src="/static/app.js?v=10"></script>
+  <!-- Multi-point Selection Popup Menu (Ctrl+click) -->
+  <div class="custom-context-menu" id="multiPointMenu" style="display:none;min-width:210px;">
+    <div id="multiPointMenuCount" style="padding:5px 14px 6px;font-size:0.78rem;opacity:0.6;border-bottom:1px solid var(--border);margin-bottom:3px;">0 points selected</div>
+    <div class="ccm-item" id="multiPointMenuInclBtn" style="color:var(--green,#4caf50);"><span class="ccm-icon">✓</span> Include in fitting</div>
+    <div class="ccm-item" id="multiPointMenuExclBtn"><span class="ccm-icon">⊘</span> Exclude from fitting</div>
+    <div class="ccm-divider"></div>
+    <div class="ccm-item" id="multiPointMenuFitOnlyBtn" style="color:var(--accent,#3b82f6);"><span class="ccm-icon">◎</span> Fit only selected</div>
+    <div class="ccm-item" id="multiPointMenuAddFitBtn" style="color:var(--accent,#e040fb);"><span class="ccm-icon">➕</span> Add curve fit</div>
+    <div class="ccm-divider"></div>
+    <div class="ccm-item" id="multiPointMenuClearBtn" style="opacity:0.65;"><span class="ccm-icon">✕</span> Clear selection</div>
+  </div>
+
+  <!-- Legend item right-click context menu -->
+  <div class="legend-ctx-menu" id="legendContextMenu" style="display:none;">
+    <div class="lcm-title">
+      <span class="lcm-icon">◈</span>
+      <span class="lcm-series-name">Series</span>
+    </div>
+    <div class="lcm-divider"></div>
+    <div class="lcm-item lcm-remove" onclick="legendMenuRemove()">
+      <span class="lcm-item-icon">✕</span> Remove from plot
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=11"></script>
 </body>
 
 </html>

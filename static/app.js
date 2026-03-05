@@ -28,6 +28,15 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
     if (btn.dataset.tab === 'editor') loadEditorPage(editorPage);
 
+    // Show/hide the DCA sidebar toggle based on active tab
+    const sidebarToggle = document.getElementById('dcaSidebarToggle');
+    if (sidebarToggle) {
+      if (btn.dataset.tab === 'dca') {
+        sidebarToggle.style.display = _dcaSidebarOpen ? 'none' : 'flex';
+      } else {
+        sidebarToggle.style.display = 'none';
+      }
+    }
   });
 
 });
@@ -148,6 +157,13 @@ let _anchorMenuJustOpened = false; // prevents doc-click from closing on same ti
 let _pointMenuCardId = null;
 let _pointMenuIdx = null;
 let _pointMenuJustOpened = false;
+
+const cardCtrlSelected = {};      // cardId -> Set<index> for Ctrl+click multi-select
+const cardMultiFits = {};         // cardId -> Array<{id, model, params, equation, indices:[], color, fittedData:[[x,y],...], forecastData:[[x,y],...]}>  
+const cardHiddenSeries = {};      // cardId -> Set<seriesName> of manually removed series
+let _multiFitNextId = 1;
+const MULTI_FIT_COLORS = ['#e040fb','#00bcd4','#ff9800','#8bc34a','#ff5722','#9c27b0','#009688','#ffc107','#795548','#607d8b'];
+let _multiPointMenuJustOpened = false;
 
 
 
@@ -1813,6 +1829,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
         <button id="pcurveBtn-${cardId}" onclick="togglePCurves('${cardId}')" title="Toggle P10/P50/P90 uncertainty curves" style="position:relative;">📊 P10/P90</button>
 
+        <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template">💾 Template</button>
+
         <button onclick="downloadChart('${cardId}','png')" title="Download PNG">PNG</button>
 
         <button onclick="downloadChart('${cardId}','jpg')" title="Download JPG">JPG</button>
@@ -1842,6 +1860,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       </div>
 
       <div class="dca-stats-summary" id="dcaStats-${cardId}" style="display:none;"></div>
+
+      <div class="multi-fit-panel" id="multiFitPanel-${cardId}" style="display:none;"></div>
 
       <div class="excl-hint" id="exclHint-${cardId}">Click scatter points to exclude them from curve fitting</div>
 
@@ -2270,6 +2290,8 @@ function removeCard(id) {
 
   delete cardLogScale[id]; delete cardLogScaleX[id]; delete cardPctChange[id]; delete cardAxisLabels[id]; delete cardAxisPositions[id];
 
+  delete cardMultiFits[id]; delete cardHiddenSeries[id];
+
   const el = document.getElementById(id);
 
   if (el) {
@@ -2304,6 +2326,16 @@ async function runSingleDCA(cardId) {
   const combineAgg = getCombineAggMode(cardId);
 
   if (!well) { alert('Please select at least one well.'); return; }
+
+  // If there are pending Ctrl-selected points, auto-include them (remove from exclusions)
+  // so that "select more points → click Plot" naturally adds them to the fit
+  const pendingCtrl = cardCtrlSelected[cardId];
+  if (pendingCtrl && pendingCtrl.size > 0) {
+    if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
+    pendingCtrl.forEach(function (idx) { cardExclusions[cardId].delete(idx); });
+    clearCtrlSelectionHighlights(cardId);
+    hideMultiPointMenu();
+  }
   // Get column selections from the card's own selectors
   const xVal = card.querySelector('.p-selX')?.value || '';
   const yVal = card.querySelector('.p-selY')?.value || '';
@@ -2493,7 +2525,13 @@ function openFullView(cardId) {
         }
         if (!params.seriesName.endsWith('Actual') && params.seriesName !== 'Excluded') return;
         let idx = params.data && params.data[2];
-        if (idx !== undefined && idx !== null) toggleExclusion(cardId, idx);
+        if (idx !== undefined && idx !== null) {
+          const nativeEvt = params.event && params.event.event;
+          if (nativeEvt) nativeEvt.stopPropagation();
+          const ex = nativeEvt ? nativeEvt.clientX : (params.event ? params.event.offsetX || 300 : 300);
+          const ey = nativeEvt ? nativeEvt.clientY : (params.event ? params.event.offsetY || 200 : 200);
+          showPointMenu(cardId, idx, ex, ey);
+        }
       });
     } else {
       fullChart.on('click', function (params) {
@@ -2512,6 +2550,7 @@ function openFullView(cardId) {
     setupUserLineDrag(cardId, fullChart);
     setupAxisDragHandles(cardId, fullChart);
     setupBoxSelection(cardId, fullChart, chartDiv);
+    setupCtrlClickSelection(cardId, fullChart, chartDiv);
     setupAxisHoverTooltip(cardId, chartDiv); // cardId allows axis hover to read same global axis styles
 
     // Resize observer to handle window resize while modal is open
@@ -4622,6 +4661,51 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
 
+  /* ---- Multi-fit additional curves ---- */
+  const multiFits = cardMultiFits[cardId];
+  if (multiFits && multiFits.length > 0) {
+    multiFits.forEach((mf, mfIdx) => {
+      const mfName = 'Curve #' + mf.id + ' (' + mf.model + ')';
+      if (mf.fittedData && mf.fittedData.length > 0) {
+        series.push({
+          name: mfName,
+          type: 'line',
+          showSymbol: false,
+          smooth: false,
+          lineStyle: { color: mf.color, width: 2.5, type: 'solid' },
+          itemStyle: { color: mf.color },
+          data: mf.fittedData,
+          z: 5,
+        });
+      }
+      if (mf.forecastData && mf.forecastData.length > 0) {
+        series.push({
+          name: mfName + ' Forecast',
+          type: 'line',
+          showSymbol: false,
+          smooth: false,
+          lineStyle: { color: mf.color, width: 2, type: 'dashed' },
+          itemStyle: { color: mf.color },
+          data: mf.forecastData,
+          z: 5,
+        });
+      }
+    });
+  }
+
+
+
+  /* ---- Filter manually-hidden series ---- */
+  const _hiddenSet = cardHiddenSeries[cardId];
+  if (_hiddenSet && _hiddenSet.size > 0) {
+    const kept = series.filter(s => {
+      if (s.name.startsWith('_') || s.name.endsWith('_bridge')) return true;
+      return !_hiddenSet.has(s.name);
+    });
+    series.length = 0;
+    kept.forEach(s => series.push(s));
+  }
+
   const legendData = series.filter(s => !s.name.endsWith('_bridge') && !s.name.startsWith('_')).map(s => s.name);
 
   const axC = isLight ? '#94a3b8' : '#333750'; // Darker axis lines for light theme
@@ -4831,8 +4915,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
       if (idx !== undefined && idx !== null) {
         const nativeEvt = params.event && params.event.event;
         if (nativeEvt) nativeEvt.stopPropagation();
-        const ex = nativeEvt ? nativeEvt.clientX : (params.event ? params.event.clientX || 300 : 300);
-        const ey = nativeEvt ? nativeEvt.clientY : (params.event ? params.event.clientY || 200 : 200);
+        const ex = nativeEvt ? nativeEvt.clientX : (params.event ? params.event.offsetX || 300 : 300);
+        const ey = nativeEvt ? nativeEvt.clientY : (params.event ? params.event.offsetY || 200 : 200);
         showPointMenu(cardId, idx, ex, ey);
       }
 
@@ -4866,6 +4950,19 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   setupLegendColorPicker(cardId, myChart);
 
+  /* Setup legend right-click → remove series context menu */
+  myChart.on('contextmenu', function(params) {
+    if (params.componentType !== 'legend') return;
+    const nativeEvt = params.event && params.event.event;
+    if (nativeEvt) nativeEvt.preventDefault();
+    const rect = chartDiv.getBoundingClientRect();
+    const cx = nativeEvt ? nativeEvt.clientX : (rect.left + (params.event ? params.event.offsetX || 0 : 0));
+    const cy = nativeEvt ? nativeEvt.clientY : (rect.top  + (params.event ? params.event.offsetY || 0 : 0));
+    showLegendContextMenu(cardId, params.name, cx, cy);
+  });
+
+  /* Update restore-hidden button visibility */
+  updateRestoreHiddenBtn(cardId);
 
 
   /* Setup P10/P90 curve drag via zr mouse events */
@@ -4961,8 +5058,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
   setupBoxSelection(cardId, myChart, chartDiv);
-
+  setupCtrlClickSelection(cardId, myChart, chartDiv);
   setupAxisHoverTooltip(cardId, chartDiv);
+
+  /* Update multi-fit panel */
+  updateMultiFitPanel(cardId);
 
   const ro = new ResizeObserver(() => myChart.resize());
 
@@ -5015,7 +5115,7 @@ function setupBoxSelection(cardId, chart, chartDiv) {
     // containPixel returns false for axis regions, so axis-pan drags are not captured.
     if (!chart.containPixel('grid', [offsetX, offsetY])) return;
 
-    _activeSelection = { cardId, chart, chartDiv, startX: offsetX, startY: offsetY, overlay: null };
+    _activeSelection = { cardId, chart, chartDiv, startX: offsetX, startY: offsetY, overlay: null, ctrlHeld: !!e.ctrlKey };
 
   });
 
@@ -5067,6 +5167,14 @@ document.addEventListener('mouseup', function (e) {
 
   const selRect = { x1: Math.min(sel.startX, endX), y1: Math.min(sel.startY, endY), x2: Math.max(sel.startX, endX), y2: Math.max(sel.startY, endY) };
 
+  // If Ctrl was held when starting the drag, add points in box to multi-select
+  if (sel.ctrlHeld || e.ctrlKey) {
+    if (sel.overlay) sel.overlay.remove();
+    addBoxPointsToCtrlSelection(sel.cardId, sel.chart, selRect);
+    showMultiPointMenu(e.clientX, e.clientY, sel.cardId);
+    return;
+  }
+
   showZoomMenu(e.clientX, e.clientY, sel.cardId, sel.chart, selRect, sel.overlay);
 
 });
@@ -5116,6 +5224,8 @@ zoomMenuEl.querySelectorAll('.zoom-menu-item').forEach(item => {
     if (action === 'reset') resetZoom(cardId);
 
     else if (action === 'fitsel') fitSelectionOnly(cardId, chart, selRect);
+
+    else if (action === 'addfit') addCurveFitFromSelection(cardId, chart, selRect);
 
     else if (action === 'exclsel') excludeSelection(cardId, chart, selRect);
 
@@ -5195,9 +5305,13 @@ function resetAll(cardId) {
 
   delete cardAxisAutoFit[cardId];
 
+  delete cardMultiFits[cardId]; delete cardHiddenSeries[cardId];
+
   setResetZoomButtonsVisible(cardId, false);
 
   const ra = document.getElementById('resetAll-' + cardId); if (ra) ra.classList.remove('show');
+
+  updateMultiFitPanel(cardId);
 
   runSingleDCA(cardId);
 
@@ -5354,6 +5468,618 @@ function excludeSelection(cardId, chart, selRect) {
 
 }
 
+
+
+/* ====================================================================
+
+   Multi-Curve Fitting — Add additional decline curves to different
+   groups of selected data on the same chart
+
+   ==================================================================== */
+
+/* Add a curve fit from a box-selection rectangle */
+async function addCurveFitFromSelection(cardId, chart, selRect) {
+  const lastData = cardLastData[cardId];
+  if (!lastData || !lastData.wells || !lastData.wells[0]) return;
+  const w = lastData.wells[0];
+  const p1 = chart.convertFromPixel('grid', [selRect.x1, selRect.y1]);
+  const p2 = chart.convertFromPixel('grid', [selRect.x2, selRect.y2]);
+  if (!p1 || !p2) return;
+
+  const isDate = w.is_date || false;
+  let xMin, xMax, yMin, yMax;
+  if (isDate) {
+    xMin = Math.floor(Math.min(p1[0], p2[0]));
+    xMax = Math.ceil(Math.max(p1[0], p2[0]));
+    yMin = Math.min(p1[1], p2[1]);
+    yMax = Math.max(p1[1], p2[1]);
+  } else {
+    xMin = Math.min(p1[0], p2[0]); xMax = Math.max(p1[0], p2[0]);
+    yMin = Math.min(p1[1], p2[1]); yMax = Math.max(p1[1], p2[1]);
+  }
+
+  // Collect indices of points inside the selection
+  const indices = [];
+  for (let i = 0; i < w.x.length; i++) {
+    let xVal, yVal = w.y_actual[i];
+    if (yVal == null) continue;
+    if (isDate) { xVal = parseDateStr(w.x[i]); } else { xVal = w.x[i]; }
+    if (xVal >= xMin && xVal <= xMax && yVal >= yMin && yVal <= yMax) {
+      indices.push(i);
+    }
+  }
+
+  if (indices.length < 3) {
+    showToast('Need at least 3 data points to fit a curve', 'warning');
+    return;
+  }
+
+  await _performMultiFit(cardId, indices);
+}
+
+/* Add a curve fit from Ctrl+click multi-selected points */
+async function addCurveFitFromMultiSelect(cardId, selectedSet) {
+  const lastData = cardLastData[cardId];
+  if (!lastData || !lastData.wells || !lastData.wells[0]) return;
+
+  const indices = [...selectedSet].sort((a, b) => a - b);
+  if (indices.length < 3) {
+    showToast('Need at least 3 data points to fit a curve', 'warning');
+    return;
+  }
+
+  await _performMultiFit(cardId, indices);
+}
+
+/* Core: fit a curve to a subset of points and add it to the multi-fit list */
+async function _performMultiFit(cardId, indices) {
+  const lastData = cardLastData[cardId];
+  const w = lastData.wells[0];
+  const isDate = w.is_date || false;
+
+  // Get model from the card
+  const card = document.getElementById(cardId);
+  const model = card?.querySelector('.p-model')?.value || lastData.model || 'exponential';
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+
+  // Build t and y arrays for the selected indices
+  const tFit = [], yFit = [];
+  for (const i of indices) {
+    if (i < w.t.length && w.y_actual[i] != null) {
+      tFit.push(w.t[i]);
+      yFit.push(w.y_actual[i]);
+    }
+  }
+
+  if (tFit.length < 3) {
+    showToast('Need at least 3 valid data points', 'warning');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/fit_inline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t: tFit, y: yFit, model, forecast_months: forecastMonths }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || 'Curve fitting failed', 'error');
+      return;
+    }
+    const fit = await res.json();
+
+    // Build fitted data series: evaluate fitted curve over the range of selected t values
+    const tMin = Math.min(...tFit), tMax = Math.max(...tFit);
+    const fittedData = [];
+    // Generate smooth curve points across the selected range
+    const nPts = Math.max(100, indices.length * 2);
+    const step = (tMax - tMin) / (nPts - 1);
+    for (let i = 0; i < nPts; i++) {
+      const tVal = tMin + step * i;
+      const yVal = evalDeclineModel(model, tVal, fit.params);
+      // Convert t back to x display value
+      if (isDate) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = parseDateStr(w.x[0]);
+        const tOffset = w.t[0] || 0;
+        const ms = firstDateMs + (tVal - tOffset) * MS_PER_DAY;
+        fittedData.push([ms, yVal]);
+      } else {
+        const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+        fittedData.push([tVal - t0 + x0, yVal]);
+      }
+    }
+
+    // Build forecast data
+    let forecastData = [];
+    if (fit.forecast_t && fit.forecast_y && fit.forecast_t.length > 0) {
+      for (let i = 0; i < fit.forecast_t.length; i++) {
+        if (isDate) {
+          const MS_PER_DAY = 86400000;
+          const firstDateMs = parseDateStr(w.x[0]);
+          const tOffset = w.t[0] || 0;
+          const ms = firstDateMs + (fit.forecast_t[i] - tOffset) * MS_PER_DAY;
+          forecastData.push([ms, fit.forecast_y[i]]);
+        } else {
+          const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+          forecastData.push([fit.forecast_t[i] - t0 + x0, fit.forecast_y[i]]);
+        }
+      }
+      // Bridge from last fitted point to first forecast point
+      if (fittedData.length > 0) {
+        forecastData.unshift(fittedData[fittedData.length - 1]);
+      }
+    }
+
+    // Assign a color
+    if (!cardMultiFits[cardId]) cardMultiFits[cardId] = [];
+    const colorIdx = cardMultiFits[cardId].length % MULTI_FIT_COLORS.length;
+
+    const curveFit = {
+      id: _multiFitNextId++,
+      model: model,
+      params: fit.params,
+      equation: fit.equation || '',
+      indices: indices,
+      color: MULTI_FIT_COLORS[colorIdx],
+      fittedData: fittedData,
+      forecastData: forecastData,
+    };
+    cardMultiFits[cardId].push(curveFit);
+
+    // Re-render chart and update management panel
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+    updateMultiFitPanel(cardId);
+
+    const fmt = (v) => typeof v === 'number' ? v.toFixed(4) : v;
+    showToast(`Curve #${curveFit.id} added (${model}, qi=${fmt(fit.params.qi)})`, 'success', 3000);
+
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+  } catch (e) {
+    showToast('Add curve fit failed: ' + e.message, 'error');
+  }
+}
+
+/* Remove a specific multi-fit curve */
+function removeMultiFit(cardId, fitId) {
+  const fits = cardMultiFits[cardId];
+  if (!fits) return;
+  const idx = fits.findIndex(f => f.id === fitId);
+  if (idx >= 0) fits.splice(idx, 1);
+  if (fits.length === 0) delete cardMultiFits[cardId];
+
+  const data = cardLastData[cardId];
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  if (data) {
+    saveZoomState(cardId);
+    renderSingleChart(cardId, data, forecastMonths);
+  }
+  updateMultiFitPanel(cardId);
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Clear all multi-fit curves */
+function clearAllMultiFits(cardId) {
+  delete cardMultiFits[cardId];
+  const data = cardLastData[cardId];
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  if (data) {
+    saveZoomState(cardId);
+    renderSingleChart(cardId, data, forecastMonths);
+  }
+  updateMultiFitPanel(cardId);
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Update the multi-fit management panel */
+function updateMultiFitPanel(cardId) {
+  const panel = document.getElementById('multiFitPanel-' + cardId);
+  if (!panel) return;
+
+  const fits = cardMultiFits[cardId];
+  if (!fits || fits.length === 0) {
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+    return;
+  }
+
+  const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
+
+  let html = '<div class="mf-header"><span class="mf-title">Additional Curves (' + fits.length + ')</span>'
+    + '<button class="mf-clear-all" onclick="clearAllMultiFits(\'' + cardId + '\')" title="Remove all additional curves">Clear All</button></div>';
+
+  fits.forEach(f => {
+    const paramStr = Object.entries(f.params).map(([k, v]) => k + '=' + fmt(v)).join(', ');
+    html += '<div class="mf-item">'
+      + '<span class="mf-color-dot" style="background:' + f.color + ';"></span>'
+      + '<span class="mf-label">Curve #' + f.id + ' <span class="mf-model">' + f.model + '</span></span>'
+      + '<span class="mf-params">' + paramStr + '</span>'
+      + '<button class="mf-remove" onclick="removeMultiFit(\'' + cardId + '\',' + f.id + ')" title="Remove this curve">&times;</button>'
+      + '</div>';
+  });
+
+  panel.innerHTML = html;
+  panel.style.display = 'block';
+}
+
+
+
+/* ====================================================================
+
+   Legend Right-Click → Remove / Restore Series
+
+   ==================================================================== */
+
+let _legendMenuCardId = null;
+let _legendMenuSeriesName = null;
+
+/* Show the floating legend context menu */
+function showLegendContextMenu(cardId, seriesName, clientX, clientY) {
+  const SKIP = ['Excluded', 'Qi Anchor'];
+  if (SKIP.includes(seriesName)) return;
+
+  _legendMenuCardId = cardId;
+  _legendMenuSeriesName = seriesName;
+
+  const menu = document.getElementById('legendContextMenu');
+  if (!menu) return;
+
+  const label = menu.querySelector('.lcm-series-name');
+  if (label) label.textContent = seriesName.length > 38 ? seriesName.slice(0, 35) + '\u2026' : seriesName;
+
+  /* Position: keep inside viewport */
+  const menuW = 200, menuH = 80;
+  const left = Math.min(clientX, window.innerWidth  - menuW - 8);
+  const top  = Math.min(clientY, window.innerHeight - menuH - 8);
+  menu.style.left = left + 'px';
+  menu.style.top  = top  + 'px';
+  menu.style.display = 'block';
+
+  setTimeout(() => {
+    document.addEventListener('mousedown', _hideLegendMenuOutside, { once: true, capture: true });
+  }, 10);
+}
+
+function _hideLegendMenuOutside(e) {
+  const menu = document.getElementById('legendContextMenu');
+  if (menu && !menu.contains(e.target)) hideLegendMenu();
+}
+
+function hideLegendMenu() {
+  const menu = document.getElementById('legendContextMenu');
+  if (menu) menu.style.display = 'none';
+  _legendMenuCardId = null;
+  _legendMenuSeriesName = null;
+}
+
+/* Called by the "Remove" button in the legend context menu */
+function legendMenuRemove() {
+  if (_legendMenuCardId && _legendMenuSeriesName) {
+    removeLegendSeries(_legendMenuCardId, _legendMenuSeriesName);
+  }
+  hideLegendMenu();
+}
+
+/* Remove (or permanently delete) a series by legend name */
+function removeLegendSeries(cardId, seriesName) {
+  /* Multi-fit curves: extract id and call proper removal */
+  const mfMatch = seriesName.match(/^Curve #(\d+) \(/);
+  if (mfMatch) {
+    removeMultiFit(cardId, parseInt(mfMatch[1]));
+    return;
+  }
+
+  /* Everything else: add to hidden set */
+  if (!cardHiddenSeries[cardId]) cardHiddenSeries[cardId] = new Set();
+  cardHiddenSeries[cardId].add(seriesName);
+
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  const lastData = cardLastData[cardId];
+  if (lastData) {
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+  }
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Restore all hidden series for a card */
+function restoreHiddenSeries(cardId) {
+  delete cardHiddenSeries[cardId];
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  const lastData = cardLastData[cardId];
+  if (lastData) {
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+  }
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Show/hide the "Restore Hidden" button in the card toolbar */
+function updateRestoreHiddenBtn(cardId) {
+  const toolbar = document.querySelector('#' + cardId + ' .chart-toolbar');
+  if (!toolbar) return;
+  let btn = toolbar.querySelector('.restore-hidden-btn');
+  const hasHidden = cardHiddenSeries[cardId] && cardHiddenSeries[cardId].size > 0;
+  if (hasHidden && !btn) {
+    btn = document.createElement('button');
+    btn.className = 'restore-hidden-btn';
+    btn.title = 'Restore all hidden series';
+    btn.textContent = '\uD83D\uDC41 Restore Hidden';
+    btn.onclick = () => restoreHiddenSeries(cardId);
+    toolbar.appendChild(btn);
+  } else if (!hasHidden && btn) {
+    btn.remove();
+  }
+}
+
+
+/* ====================================================================
+
+   DCA Templates – Save / Load / Delete / Apply
+
+   ==================================================================== */
+
+const dcaTemplates = [];           // Array of template objects
+let _dcaSidebarOpen = true;        // sidebar visible by default
+
+/* Collect full template state from a card */
+function _collectTemplateFromCard(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return null;
+
+  // Gather selected wells
+  const wells = [];
+  card.querySelectorAll('.well-picker-list input[type="checkbox"]:checked').forEach(cb => {
+    wells.push(cb.value);
+  });
+
+  const lastData = cardLastData[cardId] || null;
+  const w = lastData?.wells?.[0];
+
+  // Build a concise summary
+  const model = card.querySelector('.p-model')?.value || 'exponential';
+  const equation = lastData?.equation || '';
+  const params = lastData?.params || {};
+
+  return {
+    id: 'tpl-' + Date.now() + '-' + Math.floor(Math.random() * 10000),
+    name: card.querySelector('.p-title')?.value || (wells.length ? wells[0] : 'Untitled'),
+    createdAt: Date.now(),
+    // Card configuration
+    wells: wells,
+    selX: card.querySelector('.p-selX')?.value || '',
+    selY: card.querySelector('.p-selY')?.value || '',
+    selWellCol: card.querySelector('.p-selWellCol')?.value || '',
+    model: model,
+    forecastMonths: card.querySelector('.p-forecast')?.value || '0',
+    title: card.querySelector('.p-title')?.value || '',
+    header: (card._headerInput || card.querySelector('.p-header'))?.value || '',
+    combine: card.querySelector('.p-combine')?.checked || false,
+    combineAgg: card.querySelector('.p-combine-agg')?.value || 'sum',
+    // Fit results
+    equation: equation,
+    params: params,
+    // State
+    styles: cardStyles[cardId] ? JSON.parse(JSON.stringify(cardStyles[cardId])) : null,
+    exclusions: cardExclusions[cardId] ? [...cardExclusions[cardId]] : [],
+    pCurveState: cardPCurveState[cardId] ? JSON.parse(JSON.stringify(cardPCurveState[cardId])) : null,
+    multiFits: cardMultiFits[cardId] ? JSON.parse(JSON.stringify(cardMultiFits[cardId])) : null,
+    userLines: cardUserLines[cardId] ? JSON.parse(JSON.stringify(cardUserLines[cardId])) : [],
+    annotations: cardAnnotations[cardId] ? JSON.parse(JSON.stringify(cardAnnotations[cardId])) : [],
+    valueLabels: cardValueLabels[cardId] || 'none',
+    logScale: cardLogScale[cardId] || false,
+    logScaleX: cardLogScaleX[cardId] || false,
+    axisLabels: cardAxisLabels[cardId] ? JSON.parse(JSON.stringify(cardAxisLabels[cardId])) : null,
+    axisPositions: cardAxisPositions[cardId] ? JSON.parse(JSON.stringify(cardAxisPositions[cardId])) : null,
+    // DCA response data (for offline restoring)
+    lastData: lastData ? JSON.parse(JSON.stringify(lastData)) : null,
+  };
+}
+
+/* Save a card as a DCA template */
+function saveCardAsTemplate(cardId) {
+  const lastData = cardLastData[cardId];
+  if (!lastData) {
+    showToast('Plot the card first before saving as a template', 'warning');
+    return;
+  }
+
+  const tpl = _collectTemplateFromCard(cardId);
+  if (!tpl) return;
+
+  dcaTemplates.push(tpl);
+  _saveDcaTemplatesToIDB();
+  renderTemplateSidebar();
+
+  // Make sure sidebar is visible
+  if (!_dcaSidebarOpen) toggleDcaSidebar();
+
+  showToast('Template "' + tpl.name + '" saved', 'success', 3000);
+}
+
+/* Delete a template */
+function deleteTemplate(tplId) {
+  const idx = dcaTemplates.findIndex(t => t.id === tplId);
+  if (idx < 0) return;
+  const name = dcaTemplates[idx].name;
+  dcaTemplates.splice(idx, 1);
+  _saveDcaTemplatesToIDB();
+  renderTemplateSidebar();
+  showToast('Template "' + name + '" deleted', 'info', 2500);
+}
+
+/* Rename a template */
+function renameTemplate(tplId, newName) {
+  const tpl = dcaTemplates.find(t => t.id === tplId);
+  if (!tpl) return;
+  tpl.name = newName || tpl.name;
+  _saveDcaTemplatesToIDB();
+}
+
+/* Apply a template – creates a new card and restores the saved state */
+function applyTemplate(tplId) {
+  const tpl = dcaTemplates.find(t => t.id === tplId);
+  if (!tpl) return;
+
+  // Create a new card with preset values from the template
+  const cardId = addPlotCard(
+    tpl.wells,
+    tpl.model,
+    tpl.forecastMonths,
+    tpl.title,
+    tpl.combine,
+    tpl.header,
+    tpl.combineAgg,
+    tpl.selX,
+    tpl.selY,
+    tpl.selWellCol
+  );
+
+  if (!cardId) return;
+
+  // Restore state
+  if (tpl.styles) cardStyles[cardId] = JSON.parse(JSON.stringify(tpl.styles));
+  if (tpl.exclusions && tpl.exclusions.length) cardExclusions[cardId] = new Set(tpl.exclusions);
+  if (tpl.pCurveState) cardPCurveState[cardId] = JSON.parse(JSON.stringify(tpl.pCurveState));
+  if (tpl.multiFits) cardMultiFits[cardId] = JSON.parse(JSON.stringify(tpl.multiFits));
+  if (tpl.userLines) cardUserLines[cardId] = JSON.parse(JSON.stringify(tpl.userLines));
+  if (tpl.annotations) cardAnnotations[cardId] = JSON.parse(JSON.stringify(tpl.annotations));
+  if (tpl.valueLabels) cardValueLabels[cardId] = tpl.valueLabels;
+  if (tpl.logScale) cardLogScale[cardId] = tpl.logScale;
+  if (tpl.logScaleX) cardLogScaleX[cardId] = tpl.logScaleX;
+  if (tpl.axisLabels) cardAxisLabels[cardId] = JSON.parse(JSON.stringify(tpl.axisLabels));
+  if (tpl.axisPositions) cardAxisPositions[cardId] = JSON.parse(JSON.stringify(tpl.axisPositions));
+
+  // Restore styles to UI
+  if (tpl.styles) {
+    applyStylesToCard(cardId, tpl.styles);
+  }
+
+  // If we have stored DCA data, restore and render directly
+  if (tpl.lastData) {
+    cardLastData[cardId] = JSON.parse(JSON.stringify(tpl.lastData));
+    const card = document.getElementById(cardId);
+    if (card) {
+      card.querySelector('.chart-area').style.display = 'block';
+    }
+    renderSingleChart(cardId, cardLastData[cardId], tpl.forecastMonths);
+    updateMultiFitPanel(cardId);
+    showToast('Template "' + tpl.name + '" applied', 'success', 3000);
+  } else {
+    // No cached data – run the DCA
+    runSingleDCA(cardId);
+    showToast('Template "' + tpl.name + '" applied – running DCA...', 'info', 3000);
+  }
+
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Toggle sidebar visibility */
+function toggleDcaSidebar() {
+  const sidebar = document.getElementById('dcaSidebar');
+  const toggle = document.getElementById('dcaSidebarToggle');
+  if (!sidebar) return;
+
+  _dcaSidebarOpen = !_dcaSidebarOpen;
+  sidebar.classList.toggle('collapsed', !_dcaSidebarOpen);
+  if (toggle) toggle.classList.toggle('hidden', _dcaSidebarOpen);
+}
+
+/* Render the template sidebar contents */
+function renderTemplateSidebar() {
+  const container = document.getElementById('dcaSidebarContent');
+  if (!container) return;
+
+  if (dcaTemplates.length === 0) {
+    container.innerHTML = '<div class="dca-tpl-empty">No templates saved yet.<br><span style="font-size:.72rem;opacity:.6;">Use the 💾 button on any card to save a template.</span></div>';
+    return;
+  }
+
+  const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
+  const formatDate = (ts) => {
+    const d = new Date(ts);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  let html = '';
+  dcaTemplates.forEach(tpl => {
+    const wellNames = (tpl.wells || []).join(', ') || 'No well';
+    const paramStr = tpl.params ? Object.entries(tpl.params).map(([k, v]) => k + '=' + fmt(v)).join(', ') : '';
+    const hasPCurve = tpl.pCurveState && tpl.pCurveState.enabled;
+    const multiFitCount = (tpl.multiFits || []).length;
+
+    html += '<div class="dca-tpl-item" data-tpl-id="' + tpl.id + '">';
+    html += '  <div class="dca-tpl-date">' + formatDate(tpl.createdAt) + '</div>';
+    html += '  <div class="dca-tpl-name">';
+    html += '    <input type="text" class="dca-tpl-name-input" value="' + (tpl.name || '').replace(/"/g, '&quot;') + '" '
+      + 'onchange="renameTemplate(\'' + tpl.id + '\', this.value)" '
+      + 'title="Click to rename template">';
+    html += '  </div>';
+    html += '  <div class="dca-tpl-meta">';
+    html += '    <span class="dca-tpl-tag model">' + (tpl.model || 'exponential') + '</span>';
+    html += '    <span class="dca-tpl-tag well">' + wellNames + '</span>';
+    if (hasPCurve) html += '    <span class="dca-tpl-tag pcurve">P10/P90</span>';
+    if (multiFitCount > 0) html += '    <span class="dca-tpl-tag">+' + multiFitCount + ' curves</span>';
+    if (parseInt(tpl.forecastMonths) > 0) html += '    <span class="dca-tpl-tag">' + tpl.forecastMonths + 'mo forecast</span>';
+    html += '  </div>';
+    if (tpl.equation) {
+      html += '  <div class="dca-tpl-equation" title="' + tpl.equation.replace(/"/g, '&quot;') + '">' + tpl.equation + '</div>';
+    }
+    if (paramStr) {
+      html += '  <div class="dca-tpl-params">' + paramStr + '</div>';
+    }
+    html += '  <div class="dca-tpl-actions">';
+    html += '    <button class="tpl-apply-btn" onclick="applyTemplate(\'' + tpl.id + '\')" title="Apply this template as a new card">▶ Apply</button>';
+    html += '    <button class="tpl-delete-btn" onclick="deleteTemplate(\'' + tpl.id + '\')" title="Delete this template">🗑 Delete</button>';
+    html += '  </div>';
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
+}
+
+/* ── Template IDB Persistence ── */
+
+async function _saveDcaTemplatesToIDB() {
+  try {
+    const db = await openIDB();
+    const tx = db.transaction(IDB_WS_STORE, 'readwrite');
+    const store = tx.objectStore(IDB_WS_STORE);
+    store.put({ id: 'dcaTemplates', data: dcaTemplates });
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.warn('Failed to save DCA templates to IDB:', e);
+  }
+}
+
+async function _loadDcaTemplatesFromIDB() {
+  try {
+    const db = await openIDB();
+    const tx = db.transaction(IDB_WS_STORE, 'readonly');
+    const store = tx.objectStore(IDB_WS_STORE);
+    const result = await new Promise((resolve, reject) => {
+      const r = store.get('dcaTemplates');
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    if (result && Array.isArray(result.data)) {
+      dcaTemplates.length = 0;
+      result.data.forEach(t => dcaTemplates.push(t));
+      renderTemplateSidebar();
+    }
+  } catch (e) {
+    console.warn('Failed to load DCA templates from IDB:', e);
+  }
+}
 
 
 /* ====================================================================
@@ -5715,6 +6441,248 @@ function pointMenuToggleExclude() {
 (function () {
   const btn = document.getElementById('pointMenuExclBtn');
   if (btn) btn.addEventListener('click', pointMenuToggleExclude);
+})();
+
+/* ====================================================================
+   Ctrl+click multi-point selection
+   ==================================================================== */
+
+/* Setup a raw DOM click listener on the chart div to detect Ctrl+click.
+   This bypasses ECharts' event system entirely, which may suppress clicks
+   when modifier keys are held. We manually hit-test scatter points. */
+function setupCtrlClickSelection(cardId, chart, chartDiv) {
+  function handler(e) {
+    if (!e.ctrlKey) return; // only handle Ctrl+click
+    const data = cardLastData[cardId];
+    if (!data || !data.wells || data.wells.length !== 1) return;
+    const w = data.wells[0];
+    if (!w.x || !w.y_actual) return;
+
+    const rect = chartDiv.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+
+    // Must be inside the grid area
+    if (!chart.containPixel('grid', [px, py])) return;
+
+    const isDate = w.is_date || false;
+    const THRESHOLD = 18; // pixel distance threshold
+    let bestIdx = -1, bestDist = Infinity;
+
+    for (let i = 0; i < w.x.length; i++) {
+      if (w.y_actual[i] == null) continue;
+      const xVal = isDate ? parseDateStr(w.x[i]) : w.x[i];
+      const yVal = w.y_actual[i];
+      const ptPx = chart.convertToPixel('grid', [xVal, yVal]);
+      if (!ptPx || isNaN(ptPx[0]) || isNaN(ptPx[1])) continue;
+      const dist = Math.hypot(ptPx[0] - px, ptPx[1] - py);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+
+    if (bestIdx >= 0 && bestDist <= THRESHOLD) {
+      e.stopPropagation();
+      e.preventDefault();
+      toggleCtrlSelection(cardId, bestIdx, chart);
+      showMultiPointMenu(e.clientX, e.clientY, cardId);
+    }
+  }
+
+  // Clean up previous listener if chart was re-rendered
+  if (chartDiv.__ctrlClickHandler) {
+    chartDiv.removeEventListener('click', chartDiv.__ctrlClickHandler, true);
+  }
+  chartDiv.__ctrlClickHandler = handler;
+  chartDiv.addEventListener('click', handler, true); // capture phase
+}
+
+function toggleCtrlSelection(cardId, idx, chart) {
+  if (!cardCtrlSelected[cardId]) cardCtrlSelected[cardId] = new Set();
+  const s = cardCtrlSelected[cardId];
+  if (s.has(idx)) s.delete(idx); else s.add(idx);
+  updateCtrlSelectionHighlight(cardId, chart);
+}
+
+/* Add all data points inside a pixel rectangle to the Ctrl multi-select set */
+function addBoxPointsToCtrlSelection(cardId, chart, selRect) {
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length !== 1) return;
+  const w = data.wells[0];
+  if (!w.x || !w.y_actual) return;
+  const isDate = w.is_date || false;
+
+  if (!cardCtrlSelected[cardId]) cardCtrlSelected[cardId] = new Set();
+  const sel = cardCtrlSelected[cardId];
+
+  for (let i = 0; i < w.x.length; i++) {
+    if (w.y_actual[i] == null) continue;
+    const xVal = isDate ? parseDateStr(w.x[i]) : w.x[i];
+    const yVal = w.y_actual[i];
+    const ptPx = chart.convertToPixel('grid', [xVal, yVal]);
+    if (!ptPx || isNaN(ptPx[0]) || isNaN(ptPx[1])) continue;
+    if (ptPx[0] >= selRect.x1 && ptPx[0] <= selRect.x2 &&
+        ptPx[1] >= selRect.y1 && ptPx[1] <= selRect.y2) {
+      sel.add(i);
+    }
+  }
+
+  updateCtrlSelectionHighlight(cardId, chart);
+}
+
+function updateCtrlSelectionHighlight(cardId, chart) {
+  const selected = cardCtrlSelected[cardId];
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length === 0) return;
+  const w = data.wells[0];
+  const isDate = w.is_date || false;
+
+  // Get or create the highlight overlay canvas
+  const chartDom = chart.getDom();
+  let overlay = chartDom.querySelector('.ctrl-select-overlay');
+  if (!overlay) {
+    overlay = document.createElement('canvas');
+    overlay.className = 'ctrl-select-overlay';
+    overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:100;';
+    chartDom.style.position = 'relative';
+    chartDom.appendChild(overlay);
+  }
+  overlay.width = chartDom.clientWidth;
+  overlay.height = chartDom.clientHeight;
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  if (!selected || selected.size === 0) return;
+
+  selected.forEach(function (idx) {
+    if (idx >= w.x.length) return;
+    const xVal = isDate ? parseDateStr(w.x[idx]) : w.x[idx];
+    const yVal = w.y_actual[idx];
+    if (yVal == null) return;
+    const pxPt = chart.convertToPixel('grid', [xVal, yVal]);
+    if (!pxPt || isNaN(pxPt[0]) || isNaN(pxPt[1])) return;
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(pxPt[0], pxPt[1], 11, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,215,0,0.22)';
+    ctx.fill();
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  });
+}
+
+function clearCtrlSelectionHighlights(cardId) {
+  if (cardCtrlSelected[cardId]) cardCtrlSelected[cardId].clear();
+  // Clear overlay canvases
+  [cardId, 'fullChart-' + cardId].forEach(function (id) {
+    const ch = chartInstances[id];
+    if (!ch) return;
+    const ov = ch.getDom().querySelector('.ctrl-select-overlay');
+    if (ov) { const c = ov.getContext('2d'); c.clearRect(0, 0, ov.width, ov.height); }
+  });
+}
+
+function showMultiPointMenu(clientX, clientY, cardId) {
+  _multiPointMenuJustOpened = true;
+  setTimeout(function () { _multiPointMenuJustOpened = false; }, 50);
+
+  const count = (cardCtrlSelected[cardId] || new Set()).size;
+  const header = document.getElementById('multiPointMenuCount');
+  if (header) header.textContent = count + ' point' + (count !== 1 ? 's' : '') + ' selected';
+
+  const menu = document.getElementById('multiPointMenu');
+  menu.dataset.cardId = cardId;
+  menu.style.left = clientX + 'px';
+  menu.style.top  = clientY + 'px';
+  menu.style.display = 'block';
+
+  requestAnimationFrame(function () {
+    const mr = menu.getBoundingClientRect();
+    if (mr.right  > window.innerWidth)  menu.style.left = (clientX - mr.width)  + 'px';
+    if (mr.bottom > window.innerHeight) menu.style.top  = (clientY - mr.height) + 'px';
+  });
+}
+
+function hideMultiPointMenu() {
+  const m = document.getElementById('multiPointMenu');
+  if (m) m.style.display = 'none';
+}
+
+document.addEventListener('click', function (e) {
+  if (_multiPointMenuJustOpened) return;
+  if (!e.target.closest('#multiPointMenu')) hideMultiPointMenu();
+});
+
+function multiPointMenuApply(action) {
+  const menu = document.getElementById('multiPointMenu');
+  const cardId = menu && menu.dataset.cardId;
+  hideMultiPointMenu();
+  if (!cardId) return;
+
+  const selected = cardCtrlSelected[cardId] || new Set();
+  if (selected.size === 0) return;
+
+  if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
+  const excl = cardExclusions[cardId];
+  const w0 = cardLastData[cardId] && cardLastData[cardId].wells && cardLastData[cardId].wells[0];
+  const anchorIndices = (w0 && w0.qi_anchor_indices) ? w0.qi_anchor_indices : [];
+
+  if (action === 'exclude') {
+    // Add selected points to exclusion set
+    selected.forEach(function (idx) {
+      if (anchorIndices.includes(idx)) return;
+      excl.add(idx);
+    });
+  } else if (action === 'include') {
+    // Remove selected points from exclusion set (add them back to fitting)
+    selected.forEach(function (idx) {
+      excl.delete(idx);
+    });
+  } else if (action === 'fitonly') {
+    // Fit ONLY these selected points — exclude everything else
+    const totalLen = w0 ? w0.x.length : 0;
+    excl.clear();
+    for (let i = 0; i < totalLen; i++) {
+      if (!selected.has(i) && !anchorIndices.includes(i)) {
+        excl.add(i);
+      }
+    }
+  } else if (action === 'addfit') {
+    // Add a new curve fit to the selected points only
+    addCurveFitFromMultiSelect(cardId, selected);
+    clearCtrlSelectionHighlights(cardId);
+    return; // addCurveFitFromMultiSelect handles everything
+  }
+
+  clearCtrlSelectionHighlights(cardId);
+  saveZoomState(cardId);
+  if (w0 && w0.qi_anchor_indices && w0.qi_anchor_indices.length > 0) {
+    refitCurrentData(cardId);
+  } else {
+    runSingleDCA(cardId);
+  }
+}
+
+/* Wire up multi-point menu buttons */
+(function () {
+  const exclBtn = document.getElementById('multiPointMenuExclBtn');
+  if (exclBtn) exclBtn.addEventListener('click', function () { multiPointMenuApply('exclude'); });
+
+  const inclBtn = document.getElementById('multiPointMenuInclBtn');
+  if (inclBtn) inclBtn.addEventListener('click', function () { multiPointMenuApply('include'); });
+
+  const fitOnlyBtn = document.getElementById('multiPointMenuFitOnlyBtn');
+  if (fitOnlyBtn) fitOnlyBtn.addEventListener('click', function () { multiPointMenuApply('fitonly'); });
+
+  const addFitBtn = document.getElementById('multiPointMenuAddFitBtn');
+  if (addFitBtn) addFitBtn.addEventListener('click', function () { multiPointMenuApply('addfit'); });
+
+  const clearBtn = document.getElementById('multiPointMenuClearBtn');
+  if (clearBtn) clearBtn.addEventListener('click', function () {
+    const menu = document.getElementById('multiPointMenu');
+    const cardId = menu && menu.dataset.cardId;
+    hideMultiPointMenu();
+    if (cardId) clearCtrlSelectionHighlights(cardId);
+  });
 })();
 
 /* --- Set Qi at any point --- */
@@ -7645,6 +8613,9 @@ function saveWorkspaceToFile() {
   });
   state.cardLastData = cardData;
 
+  /* Include DCA templates in the workspace file */
+  state.dcaTemplates = dcaTemplates;
+
   /* Fetch derived column formulas from the server so they survive export/import */
   const _finishSave = (derivedCols) => {
     if (derivedCols && derivedCols.length) state.derivedColumns = derivedCols;
@@ -7812,6 +8783,11 @@ async function loadWorkspaceFromFile() {
         if (cs.headers) cardHeaders[newId] = cs.headers;
         if (cs.zoomState || cs.zoom) cardZoomState[newId] = cs.zoomState || cs.zoom;
         if (cs.pCurveState) cardPCurveState[newId] = cs.pCurveState;
+        if (cs.multiFits && cs.multiFits.length > 0) {
+          cardMultiFits[newId] = cs.multiFits;
+          cs.multiFits.forEach(mf => { if (mf.id >= _multiFitNextId) _multiFitNextId = mf.id + 1; });
+        }
+        if (cs.hiddenSeries && cs.hiddenSeries.length > 0) cardHiddenSeries[newId] = new Set(cs.hiddenSeries);
 
         if (cs.styles) {
           const mergedStyles = { ...getDefaultStyles(), ...cs.styles };
@@ -7842,6 +8818,14 @@ async function loadWorkspaceFromFile() {
       }
 
       switchPage(activePageId);
+
+      /* Restore DCA templates from file */
+      if (state.dcaTemplates && Array.isArray(state.dcaTemplates)) {
+        dcaTemplates.length = 0;
+        state.dcaTemplates.forEach(t => dcaTemplates.push(t));
+        _saveDcaTemplatesToIDB();
+        renderTemplateSidebar();
+      }
 
       showNotification('Workspace loaded');
 
@@ -9624,6 +10608,8 @@ function _collectWorkspaceState() {
       headers: cardHeaders[cid] || '',
       zoomState: cardZoomState[cid] || null,
       pCurveState: cardPCurveState[cid] || null,
+      multiFits: cardMultiFits[cid] || null,
+      hiddenSeries: cardHiddenSeries[cid] ? [...cardHiddenSeries[cid]] : [],
       hasPlot: (card.querySelector('.chart-area')?.style.display !== 'none'),
     });
   });
@@ -9885,6 +10871,12 @@ async function loadWorkspace() {
       if (c.headers) cardHeaders[cardId] = c.headers;
       if (c.zoomState) cardZoomState[cardId] = c.zoomState;
       if (c.pCurveState) cardPCurveState[cardId] = c.pCurveState;
+      if (c.multiFits && c.multiFits.length > 0) {
+        cardMultiFits[cardId] = c.multiFits;
+        // Ensure _multiFitNextId stays above any restored IDs
+        c.multiFits.forEach(mf => { if (mf.id >= _multiFitNextId) _multiFitNextId = mf.id + 1; });
+      }
+      if (c.hiddenSeries && c.hiddenSeries.length > 0) cardHiddenSeries[cardId] = new Set(c.hiddenSeries);
 
       if (c.styles) {
         const mergedStyles = { ...getDefaultStyles(), ...c.styles };
@@ -10000,6 +10992,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     } catch (e) {
       console.warn('Auto-restore failed:', e);
+    }
+    // Load DCA templates from IDB
+    try {
+      await _loadDcaTemplatesFromIDB();
+    } catch (e) {
+      console.warn('Failed to load DCA templates:', e);
     }
   }, 500);
 });
