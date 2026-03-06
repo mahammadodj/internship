@@ -162,6 +162,7 @@ let _pointMenuJustOpened = false;
 const cardCtrlSelected = {};      // cardId -> Set<index> for Ctrl+click multi-select
 const cardMultiFits = {};         // cardId -> Array<{id, model, params, equation, indices:[], color, fittedData:[[x,y],...], forecastData:[[x,y],...]}>  
 const cardHiddenSeries = {};      // cardId -> Set<seriesName> of manually removed series
+const cardActiveCurveStyle = {};  // cardId -> 'well:wellName' or 'mf:id' identifying the visible style section
 let _multiFitNextId = 1;
 const MULTI_FIT_COLORS = ['#e040fb', '#00bcd4', '#ff9800', '#8bc34a', '#ff5722', '#9c27b0', '#009688', '#ffc107', '#795548', '#607d8b'];
 let _multiPointMenuJustOpened = false;
@@ -1739,67 +1740,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
     </div>
 
     <div class="style-panel" id="style-${cardId}">
-      <div class="style-section">
-        <div class="style-section-title">Data Series</div>
-        <div class="style-row">
-          <span class="style-label">Actual Pts</span>
-          <input type="color" class="s-actual-color" value="#3b82f6">
-          <select class="s-actual-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle">▲ Triangle</option></select>
-          <input type="range" class="s-actual-size" min="2" max="20" value="10" title="Size">
-          <span class="s-actual-size-val style-range-val">10</span>
-        </div>
-        <div class="style-row">
-          <span class="style-label">Fitted Curve</span>
-          <input type="color" class="s-fitted-color" value="#f59e0b">
-          <select class="s-fitted-style"><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
-          <input type="range" class="s-fitted-width" min="1" max="6" value="2" title="Width">
-          <span class="s-fitted-width-val style-range-val">2</span>
-        </div>
-        <div class="style-row">
-          <span class="style-label">Fitted Markers</span>
-          <label class="style-check"><input type="checkbox" class="s-fitted-markers" checked> Show</label>
-          <select class="s-fitted-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle" selected>▲ Triangle</option></select>
-          <input type="range" class="s-fitted-msize" min="2" max="25" value="14" title="Size">
-          <span class="s-fitted-msize-val style-range-val">14</span>
-        </div>
-      </div>
-      <div class="style-section">
-        <div class="style-section-title">Forecast</div>
-        <div class="style-row">
-          <span class="style-label">Forecast</span>
-          <input type="color" class="s-forecast-color" value="#22c55e">
-          <select class="s-forecast-style"><option value="solid">Solid</option><option value="dashed" selected>Dashed</option><option value="dotted">Dotted</option></select>
-          <input type="range" class="s-forecast-width" min="1" max="6" value="3" title="Width">
-          <span class="s-forecast-width-val style-range-val">3</span>
-        </div>
-        <div class="style-row">
-          <span class="style-label">Fcst Markers</span>
-          <label class="style-check"><input type="checkbox" class="s-forecast-markers" checked> Show</label>
-          <label class="style-check"><input type="checkbox" class="s-forecast-labels"> Labels</label>
-          <select class="s-forecast-symbol"><option value="circle">● Circle</option><option value="diamond">◆ Diamond</option><option value="rect">■ Square</option><option value="triangle" selected>▲ Triangle</option></select>
-          <input type="range" class="s-forecast-msize" min="2" max="20" value="14" title="Size">
-          <span class="s-forecast-msize-val style-range-val">14</span>
-        </div>
-      </div>
-      <div class="style-section">
-        <div class="style-section-title">Uncertainty Curves</div>
-        <div class="style-row">
-          <span class="style-label">P10 Curve</span>
-          <input type="color" class="s-p10-color" value="#22c55e">
-          <label class="style-check"><input type="checkbox" class="s-p10-line" checked> Line</label>
-          <label class="style-check"><input type="checkbox" class="s-p10-marker" checked> Markers</label>
-          <label class="style-check"><input type="checkbox" class="s-p10-labels"> Labels</label>
-          <select class="s-p10-style"><option value="solid" selected>Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
-        </div>
-        <div class="style-row">
-          <span class="style-label">P90 Curve</span>
-          <input type="color" class="s-p90-color" value="#ef4444">
-          <label class="style-check"><input type="checkbox" class="s-p90-line" checked> Line</label>
-          <label class="style-check"><input type="checkbox" class="s-p90-marker" checked> Markers</label>
-          <label class="style-check"><input type="checkbox" class="s-p90-labels"> Labels</label>
-          <select class="s-p90-style"><option value="solid" selected>Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select>
-        </div>
-      </div>
+      <div class="style-curves-container" id="styleCurves-${cardId}"></div>
       <div class="style-section">
         <div class="style-section-title">Layout</div>
         <div class="style-row">
@@ -1921,6 +1862,9 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
   cardWrap.appendChild(headerDiv);
   cardWrap.appendChild(card);
   container.appendChild(cardWrap);
+
+  // Build initial curve style sections (will show defaults until data is loaded)
+  rebuildCurveStyleSections(cardId);
 
   // ─── Populate per-card column selectors ───
   populateCardColumnSelectors(cardId, presetSelX, presetSelY, presetSelWellCol);
@@ -2061,6 +2005,381 @@ function getDefaultStyles() {
   return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 10, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
 }
 
+/* Build per-curve style HTML sections inside the style panel.
+   Called after cardLastData is populated so we know the well names. */
+function rebuildCurveStyleSections(cardId) {
+  const container = document.getElementById('styleCurves-' + cardId);
+  if (!container) return;
+
+  const card = document.getElementById(cardId);
+  const data = cardLastData[cardId];
+  const wells = data && data.wells ? data.wells : [];
+  const isSingle = wells.length <= 1;
+  const defaults = getDefaultStyles();
+  const stored = cardStyles[cardId] || defaults;
+  const curveStyles = stored.curveStyles || {};
+  const mfStyles = stored.multiFitStyles || {};
+  const palette = getPlotThemePalette(stored.plotTheme || 'classic');
+  const multiFits = cardMultiFits[cardId] || [];
+
+  /* Helper: escape well name for use in data attribute */
+  const esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;');
+
+  const sel = (options, selected) => options.map(o => '<option value="' + o.v + '"' + (o.v === selected ? ' selected' : '') + '>' + o.l + '</option>').join('');
+  const symOpts = [{v:'circle',l:'● Circle'},{v:'diamond',l:'◆ Diamond'},{v:'rect',l:'■ Square'},{v:'triangle',l:'▲ Triangle'}];
+  const lineOpts = [{v:'solid',l:'Solid'},{v:'dashed',l:'Dashed'},{v:'dotted',l:'Dotted'}];
+  const chk = (v) => v ? ' checked' : '';
+
+  /* Build list of all available curves for the selector */
+  const curveList = []; /* { key, label, dotColor } */
+  const wellNames = [];
+  if (wells.length === 0) {
+    wellNames.push('default');
+  } else {
+    wells.forEach((w, idx) => wellNames.push(w.well || ('Well ' + (idx + 1))));
+  }
+  const mainModel = data?.model || 'exponential';
+  wellNames.forEach((wn, idx) => {
+    const cs = curveStyles[wn] || {};
+    const defColor = (!isSingle) ? (palette[idx % palette.length]) : (cs.fittedColor || stored.fittedColor || defaults.fittedColor);
+    const dotColor = cs.fittedColor || defColor;
+    const label = (isSingle ? wn : wn) + ' (' + mainModel + ')';
+    curveList.push({ key: 'well:' + wn, label: label, dotColor: dotColor });
+  });
+  multiFits.forEach(mf => {
+    const ms = mfStyles['mf_' + mf.id] || {};
+    const dotColor = ms.color || mf.color || '#8b5cf6';
+    curveList.push({ key: 'mf:' + mf.id, label: 'Curve #' + mf.id + ' (' + mf.model + ')', dotColor: dotColor });
+  });
+
+  /* Determine active key */
+  let activeKey = cardActiveCurveStyle[cardId];
+  if (!activeKey || !curveList.find(c => c.key === activeKey)) {
+    activeKey = curveList.length > 0 ? curveList[0].key : null;
+  }
+  cardActiveCurveStyle[cardId] = activeKey;
+
+  /* ---- Build selector dropdown ---- */
+  let html = '';
+  if (curveList.length > 1) {
+    html += '<div class="style-curve-selector"><select class="sc-curve-select">';
+    curveList.forEach(c => {
+      html += '<option value="' + esc(c.key) + '"' + (c.key === activeKey ? ' selected' : '') + '>' + c.label + '</option>';
+    });
+    html += '</select></div>';
+  }
+
+  /* ---- Build well sections (hidden unless active) ---- */
+  const buildCurveSection = (wellName, wIdx) => {
+    const cs = curveStyles[wellName] || {};
+    const isMulti = !isSingle;
+    const defActualColor = isMulti ? (palette[wIdx % palette.length]) : (cs.actualColor || stored.actualColor || defaults.actualColor);
+    const defFittedColor = isMulti ? (palette[wIdx % palette.length]) : (cs.fittedColor || stored.fittedColor || defaults.fittedColor);
+    const defForecastColor = isMulti ? (palette[wIdx % palette.length]) : (cs.forecastColor || stored.forecastColor || defaults.forecastColor);
+    const actualColor = cs.actualColor || defActualColor;
+    const actualSymbol = cs.actualSymbol || stored.actualSymbol || defaults.actualSymbol;
+    const actualSize = cs.actualSize != null ? cs.actualSize : (stored.actualSize != null ? stored.actualSize : defaults.actualSize);
+    const fittedColor = cs.fittedColor || defFittedColor;
+    const fittedStyle = cs.fittedStyle || stored.fittedStyle || defaults.fittedStyle;
+    const fittedWidth = cs.fittedWidth != null ? cs.fittedWidth : (stored.fittedWidth != null ? stored.fittedWidth : defaults.fittedWidth);
+    const fittedMarkers = cs.fittedMarkers != null ? cs.fittedMarkers : (stored.fittedMarkers != null ? stored.fittedMarkers : defaults.fittedMarkers);
+    const fittedSymbol = cs.fittedSymbol || stored.fittedSymbol || defaults.fittedSymbol;
+    const fittedSymbolSize = cs.fittedSymbolSize != null ? cs.fittedSymbolSize : (stored.fittedSymbolSize != null ? stored.fittedSymbolSize : defaults.fittedSymbolSize);
+    const forecastColor = cs.forecastColor || defForecastColor;
+    const forecastStyle = cs.forecastStyle || stored.forecastStyle || defaults.forecastStyle;
+    const forecastWidth = cs.forecastWidth != null ? cs.forecastWidth : (stored.forecastWidth != null ? stored.forecastWidth : defaults.forecastWidth);
+    const forecastMarkers = cs.forecastMarkers != null ? cs.forecastMarkers : (stored.forecastMarkers != null ? stored.forecastMarkers : defaults.forecastMarkers);
+    const forecastLabels = cs.forecastLabels != null ? cs.forecastLabels : (stored.forecastLabels != null ? stored.forecastLabels : defaults.forecastLabels);
+    const forecastSymbol = cs.forecastSymbol || stored.forecastSymbol || defaults.forecastSymbol;
+    const forecastSymbolSize = cs.forecastSymbolSize != null ? cs.forecastSymbolSize : (stored.forecastSymbolSize != null ? stored.forecastSymbolSize : defaults.forecastSymbolSize);
+    const p10Color = cs.p10Color || stored.p10Color || defaults.p10Color;
+    const p10Line = cs.p10Line != null ? cs.p10Line : (stored.p10Line != null ? stored.p10Line : defaults.p10Line);
+    const p10Marker = cs.p10Marker != null ? cs.p10Marker : (stored.p10Marker != null ? stored.p10Marker : defaults.p10Marker);
+    const p10Labels = cs.p10Labels != null ? cs.p10Labels : (stored.p10Labels != null ? stored.p10Labels : defaults.p10Labels);
+    const p10Style = cs.p10Style || stored.p10Style || defaults.p10Style;
+    const p90Color = cs.p90Color || stored.p90Color || defaults.p90Color;
+    const p90Line = cs.p90Line != null ? cs.p90Line : (stored.p90Line != null ? stored.p90Line : defaults.p90Line);
+    const p90Marker = cs.p90Marker != null ? cs.p90Marker : (stored.p90Marker != null ? stored.p90Marker : defaults.p90Marker);
+    const p90Labels = cs.p90Labels != null ? cs.p90Labels : (stored.p90Labels != null ? stored.p90Labels : defaults.p90Labels);
+    const p90Style = cs.p90Style || stored.p90Style || defaults.p90Style;
+
+    const sectionKey = 'well:' + wellName;
+    const isActive = sectionKey === activeKey;
+    const dw = 'data-well="' + esc(wellName) + '"';
+    const prefix = isSingle ? '' : wellName + ' ';
+    const seriesName = prefix + 'Fitted';
+
+    html += '<div class="style-section style-curve-section" ' + dw + ' data-curve-key="' + esc(sectionKey) + '" data-series-name="' + esc(seriesName) + '"' + (isActive ? '' : ' style="display:none"') + '>';
+
+    /* Model selector */
+    const mainModelOpts = [{v:'exponential',l:'Exponential'},{v:'hyperbolic',l:'Hyperbolic'},{v:'harmonic',l:'Harmonic'}];
+    html += '<div class="style-row"><span class="style-label">Model</span>'
+      + '<select class="sc-main-model" ' + dw + '>' + sel(mainModelOpts, mainModel) + '</select>'
+      + '</div>';
+
+    /* Actual Points */
+    html += '<div class="style-row"><span class="style-label">Actual Pts</span>'
+      + '<input type="color" class="sc-actual-color" ' + dw + ' value="' + actualColor + '">'
+      + '<select class="sc-actual-symbol" ' + dw + '>' + sel(symOpts, actualSymbol) + '</select>'
+      + '<input type="range" class="sc-actual-size" ' + dw + ' min="2" max="20" value="' + actualSize + '" title="Size">'
+      + '<span class="style-range-val">' + actualSize + '</span>'
+      + '</div>';
+
+    /* Fitted Curve */
+    html += '<div class="style-row"><span class="style-label">Fitted Curve</span>'
+      + '<input type="color" class="sc-fitted-color" ' + dw + ' value="' + fittedColor + '">'
+      + '<select class="sc-fitted-style" ' + dw + '>' + sel(lineOpts, fittedStyle) + '</select>'
+      + '<input type="range" class="sc-fitted-width" ' + dw + ' min="1" max="6" value="' + fittedWidth + '" title="Width">'
+      + '<span class="style-range-val">' + fittedWidth + '</span>'
+      + '</div>';
+
+    /* Fitted Markers */
+    html += '<div class="style-row"><span class="style-label">Fitted Markers</span>'
+      + '<label class="style-check"><input type="checkbox" class="sc-fitted-markers" ' + dw + chk(fittedMarkers) + '> Show</label>'
+      + '<select class="sc-fitted-symbol" ' + dw + '>' + sel(symOpts, fittedSymbol) + '</select>'
+      + '<input type="range" class="sc-fitted-msize" ' + dw + ' min="2" max="25" value="' + fittedSymbolSize + '" title="Size">'
+      + '<span class="style-range-val">' + fittedSymbolSize + '</span>'
+      + '</div>';
+
+    /* Forecast */
+    html += '<div class="style-row"><span class="style-label">Forecast</span>'
+      + '<input type="color" class="sc-forecast-color" ' + dw + ' value="' + forecastColor + '">'
+      + '<select class="sc-forecast-style" ' + dw + '>' + sel(lineOpts, forecastStyle) + '</select>'
+      + '<input type="range" class="sc-forecast-width" ' + dw + ' min="1" max="6" value="' + forecastWidth + '" title="Width">'
+      + '<span class="style-range-val">' + forecastWidth + '</span>'
+      + '</div>';
+
+    /* Forecast Markers */
+    html += '<div class="style-row"><span class="style-label">Fcst Markers</span>'
+      + '<label class="style-check"><input type="checkbox" class="sc-forecast-markers" ' + dw + chk(forecastMarkers) + '> Show</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-forecast-labels" ' + dw + chk(forecastLabels) + '> Labels</label>'
+      + '<select class="sc-forecast-symbol" ' + dw + '>' + sel(symOpts, forecastSymbol) + '</select>'
+      + '<input type="range" class="sc-forecast-msize" ' + dw + ' min="2" max="20" value="' + forecastSymbolSize + '" title="Size">'
+      + '<span class="style-range-val">' + forecastSymbolSize + '</span>'
+      + '</div>';
+
+    /* P10/P90 */
+    html += '<div class="style-row"><span class="style-label">P10 Curve</span>'
+      + '<input type="color" class="sc-p10-color" ' + dw + ' value="' + p10Color + '">'
+      + '<label class="style-check"><input type="checkbox" class="sc-p10-line" ' + dw + chk(p10Line) + '> Line</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-p10-marker" ' + dw + chk(p10Marker) + '> Markers</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-p10-labels" ' + dw + chk(p10Labels) + '> Labels</label>'
+      + '<select class="sc-p10-style" ' + dw + '>' + sel(lineOpts, p10Style) + '</select>'
+      + '</div>';
+
+    html += '<div class="style-row"><span class="style-label">P90 Curve</span>'
+      + '<input type="color" class="sc-p90-color" ' + dw + ' value="' + p90Color + '">'
+      + '<label class="style-check"><input type="checkbox" class="sc-p90-line" ' + dw + chk(p90Line) + '> Line</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-p90-marker" ' + dw + chk(p90Marker) + '> Markers</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-p90-labels" ' + dw + chk(p90Labels) + '> Labels</label>'
+      + '<select class="sc-p90-style" ' + dw + '>' + sel(lineOpts, p90Style) + '</select>'
+      + '</div>';
+
+    html += '</div>'; /* close section */
+  };
+
+  wellNames.forEach((wn, idx) => buildCurveSection(wn, idx));
+
+  /* ---- Multi-fit curve style sections (with P10/P90) ---- */
+  multiFits.forEach(mf => {
+    const mfKey = 'mf_' + mf.id;
+    const ms = mfStyles[mfKey] || {};
+    const mfColor = ms.color || mf.color || '#8b5cf6';
+    const mfLineStyle = ms.lineStyle || 'solid';
+    const mfWidth = ms.lineWidth != null ? ms.lineWidth : 2.5;
+    const mfP10Color = ms.p10Color || mfColor;
+    const mfP10Line = ms.p10Line != null ? ms.p10Line : true;
+    const mfP10Marker = ms.p10Marker || false;
+    const mfP10Labels = ms.p10Labels || false;
+    const mfP10Style = ms.p10Style || 'dotted';
+    const mfP90Color = ms.p90Color || mfColor;
+    const mfP90Line = ms.p90Line != null ? ms.p90Line : true;
+    const mfP90Marker = ms.p90Marker || false;
+    const mfP90Labels = ms.p90Labels || false;
+    const mfP90Style = ms.p90Style || 'dotted';
+    const mfSeriesName = 'Curve #' + mf.id + ' (' + mf.model + ')';
+    const sectionKey = 'mf:' + mf.id;
+    const isActive = sectionKey === activeKey;
+
+    html += '<div class="style-section style-curve-section style-mf-section" data-mf-id="' + mf.id + '" data-curve-key="' + esc(sectionKey) + '" data-series-name="' + esc(mfSeriesName) + '"' + (isActive ? '' : ' style="display:none"') + '>';
+
+    /* Model selector */
+    const modelOpts2 = [{v:'exponential',l:'Exponential'},{v:'hyperbolic',l:'Hyperbolic'},{v:'harmonic',l:'Harmonic'}];
+    html += '<div class="style-row"><span class="style-label">Model</span>'
+      + '<select class="sc-mf-model" data-mf-id="' + mf.id + '">' + sel(modelOpts2, mf.model) + '</select>'
+      + '</div>';
+
+    html += '<div class="style-row"><span class="style-label">Color</span>'
+      + '<input type="color" class="sc-mf-color" data-mf-id="' + mf.id + '" value="' + mfColor + '">'
+      + '</div>';
+
+    html += '<div class="style-row"><span class="style-label">Line Style</span>'
+      + '<select class="sc-mf-line-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfLineStyle) + '</select>'
+      + '<input type="range" class="sc-mf-line-width" data-mf-id="' + mf.id + '" min="1" max="6" value="' + mfWidth + '" title="Width">'
+      + '<span class="style-range-val">' + mfWidth + '</span>'
+      + '</div>';
+
+    const mfMarkers = ms.showMarkers || false;
+    const mfMarkerSymbol = ms.markerSymbol || 'circle';
+    const mfMarkerSize = ms.markerSize != null ? ms.markerSize : 8;
+    const mfShowLabels = ms.showLabels || false;
+    html += '<div class="style-row"><span class="style-label">Markers</span>'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-markers" data-mf-id="' + mf.id + '"' + chk(mfMarkers) + '> Show</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-labels" data-mf-id="' + mf.id + '"' + chk(mfShowLabels) + '> Labels</label>'
+      + '<select class="sc-mf-symbol" data-mf-id="' + mf.id + '">' + sel(symOpts, mfMarkerSymbol) + '</select>'
+      + '<input type="range" class="sc-mf-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfMarkerSize + '" title="Size">'
+      + '<span class="style-range-val">' + mfMarkerSize + '</span>'
+      + '</div>';
+      + '<input type="color" class="sc-mf-color" data-mf-id="' + mf.id + '" value="' + mfColor + '">'
+      + '</div>';
+
+    html += '<div class="style-row"><span class="style-label">Line Style</span>'
+      + '<select class="sc-mf-line-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfLineStyle) + '</select>'
+      + '<input type="range" class="sc-mf-line-width" data-mf-id="' + mf.id + '" min="1" max="6" value="' + mfWidth + '" title="Width">'
+      + '<span class="style-range-val">' + mfWidth + '</span>'
+      + '</div>';
+
+    html += '<div class="style-row"><span class="style-label">P10 Curve</span>'
+      + '<input type="color" class="sc-mf-p10-color" data-mf-id="' + mf.id + '" value="' + mfP10Color + '">'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-p10-line" data-mf-id="' + mf.id + '"' + chk(mfP10Line) + '> Line</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-p10-marker" data-mf-id="' + mf.id + '"' + chk(mfP10Marker) + '> Markers</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-p10-labels" data-mf-id="' + mf.id + '"' + chk(mfP10Labels) + '> Labels</label>'
+      + '<select class="sc-mf-p10-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfP10Style) + '</select>'
+      + '</div>';
+
+    html += '<div class="style-row"><span class="style-label">P90 Curve</span>'
+      + '<input type="color" class="sc-mf-p90-color" data-mf-id="' + mf.id + '" value="' + mfP90Color + '">'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-p90-line" data-mf-id="' + mf.id + '"' + chk(mfP90Line) + '> Line</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-p90-marker" data-mf-id="' + mf.id + '"' + chk(mfP90Marker) + '> Markers</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-p90-labels" data-mf-id="' + mf.id + '"' + chk(mfP90Labels) + '> Labels</label>'
+      + '<select class="sc-mf-p90-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfP90Style) + '</select>'
+      + '</div>';
+
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
+
+  /* ---- Wire up curve selector dropdown ---- */
+  const selectEl = container.querySelector('.sc-curve-select');
+  if (selectEl) {
+    selectEl.addEventListener('change', () => {
+      const newKey = selectEl.value;
+      cardActiveCurveStyle[cardId] = newKey;
+      container.querySelectorAll('.style-curve-section').forEach(sec => {
+        sec.style.display = sec.getAttribute('data-curve-key') === newKey ? '' : 'none';
+      });
+    });
+  }
+
+  /* ---- Wire up live re-render for per-well controls ---- */
+  const liveStyleRerender = () => {
+    const st = readCardStyles(cardId);
+    cardStyles[cardId] = st;
+    const headerEl = card._headerInput || card.querySelector('.p-header');
+    if (headerEl) {
+      headerEl.style.fontSize = st.headerFontSize + 'rem';
+      headerEl.style.color = st.headerColor;
+      headerEl.style.fontWeight = st.headerFontWeight || 'normal';
+      headerEl.style.textAlign = st.headerTextAlign || 'left';
+    }
+    if (chartInstances[cardId] && cardLastData[cardId]) {
+      saveZoomState(cardId);
+      renderSingleChart(cardId, cardLastData[cardId], card.querySelector('.p-forecast')?.value || 0);
+    }
+  };
+
+  container.querySelectorAll('input[type="range"]').forEach(r => {
+    const valSpan = r.nextElementSibling;
+    r.addEventListener('input', () => {
+      if (valSpan) valSpan.textContent = r.value;
+      liveStyleRerender();
+    });
+  });
+  container.querySelectorAll('input[type="color"], select:not(.sc-curve-select):not(.sc-mf-model):not(.sc-main-model), input[type="checkbox"]').forEach(el => {
+    el.addEventListener('change', liveStyleRerender);
+  });
+
+  /* Wire up model selectors for multi-fit curves (re-fit, not just style) */
+  container.querySelectorAll('.sc-mf-model').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const mfId = sel.getAttribute('data-mf-id');
+      changeMultiFitModel(cardId, mfId, sel.value);
+    });
+  });
+
+  /* Wire up model selector for main fit curve (re-fit with new model) */
+  container.querySelectorAll('.sc-main-model').forEach(sel => {
+    sel.addEventListener('change', () => {
+      changeMainFitModel(cardId, sel.value);
+    });
+  });
+}
+
+/* Switch the visible style section to the curve matching seriesName */
+function highlightStyleSection(cardId, seriesName) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+
+  /* Open style panel if closed */
+  const panel = document.getElementById('style-' + cardId);
+  if (panel && !panel.classList.contains('show')) panel.classList.add('show');
+
+  const container = document.getElementById('styleCurves-' + cardId);
+  if (!container) return;
+
+  /* Resolve seriesName to a data-curve-key */
+  let targetKey = null;
+
+  /* Direct match by data-series-name */
+  container.querySelectorAll('.style-curve-section').forEach(sec => {
+    if (sec.getAttribute('data-series-name') === seriesName) {
+      targetKey = sec.getAttribute('data-curve-key');
+    }
+  });
+
+  /* For P10/P90 or Actual: map back to parent section */
+  if (!targetKey) {
+    const cleaned = seriesName.replace(/ P10.*$| P90.*$/, '').replace(/ Actual$/, ' Fitted').replace(/^Actual$/, 'Fitted');
+    container.querySelectorAll('.style-curve-section').forEach(sec => {
+      if (sec.getAttribute('data-series-name') === cleaned) {
+        targetKey = sec.getAttribute('data-curve-key');
+      }
+    });
+  }
+  /* Multi-fit P10/P90: "Curve #1 (exp) P10" → "Curve #1 (exp)" */
+  if (!targetKey) {
+    const mfCleaned = seriesName.replace(/ P10$| P90$/, '');
+    container.querySelectorAll('.style-curve-section').forEach(sec => {
+      if (sec.getAttribute('data-series-name') === mfCleaned) {
+        targetKey = sec.getAttribute('data-curve-key');
+      }
+    });
+  }
+
+  if (!targetKey) return;
+
+  /* Switch active section */
+  cardActiveCurveStyle[cardId] = targetKey;
+  container.querySelectorAll('.style-curve-section').forEach(sec => {
+    sec.style.display = sec.getAttribute('data-curve-key') === targetKey ? '' : 'none';
+  });
+
+  /* Update selector dropdown if present */
+  const selectEl = container.querySelector('.sc-curve-select');
+  if (selectEl) selectEl.value = targetKey;
+
+  /* Flash highlight */
+  const targetSection = container.querySelector('.style-curve-section[data-curve-key="' + targetKey + '"]');
+  if (targetSection) {
+    targetSection.classList.remove('style-section-highlight');
+    void targetSection.offsetWidth; /* force reflow */
+    targetSection.classList.add('style-section-highlight');
+    targetSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    setTimeout(() => targetSection.classList.remove('style-section-highlight'), 2000);
+  }
+}
+
 const PLOT_THEME_PRESETS = {
   classic: {
     actualColor: '#3b82f6', fittedColor: '#f59e0b', forecastColor: '#22c55e', p10Color: '#22c55e', p90Color: '#ef4444',
@@ -2092,15 +2411,18 @@ function applyPlotThemePresetToCard(cardId, themeName) {
   const card = document.getElementById(cardId);
   const preset = PLOT_THEME_PRESETS[themeName];
   if (!card || !preset) return;
-  const setVal = (sel, val) => {
-    const el = card.querySelector(sel);
-    if (el) el.value = val;
-  };
-  setVal('.s-actual-color', preset.actualColor);
-  setVal('.s-fitted-color', preset.fittedColor);
-  setVal('.s-forecast-color', preset.forecastColor);
-  setVal('.s-p10-color', preset.p10Color);
-  setVal('.s-p90-color', preset.p90Color);
+  const palette = preset.palette || [preset.actualColor];
+  const sections = card.querySelectorAll('.style-curve-section[data-well]');
+  const isSingle = sections.length <= 1;
+  sections.forEach((sec, idx) => {
+    const color = isSingle ? preset.actualColor : palette[idx % palette.length];
+    const q = (cls) => sec.querySelector('.' + cls);
+    if (q('sc-actual-color'))   q('sc-actual-color').value = color;
+    if (q('sc-fitted-color'))   q('sc-fitted-color').value = isSingle ? preset.fittedColor : color;
+    if (q('sc-forecast-color')) q('sc-forecast-color').value = isSingle ? preset.forecastColor : color;
+    if (q('sc-p10-color'))      q('sc-p10-color').value = preset.p10Color;
+    if (q('sc-p90-color'))      q('sc-p90-color').value = preset.p90Color;
+  });
 }
 
 
@@ -2111,60 +2433,105 @@ function readCardStyles(cardId) {
 
   if (!card) return getDefaultStyles();
 
+  /* Read per-curve styles from dynamic sections */
+  const curveStyles = {};
+  const curveSections = card.querySelectorAll('.style-curve-section');
+  curveSections.forEach(sec => {
+    const wellName = sec.getAttribute('data-well');
+    if (!wellName) return;
+    const q = (cls) => sec.querySelector('.' + cls);
+    curveStyles[wellName] = {
+      actualColor: q('sc-actual-color')?.value || '#3b82f6',
+      actualSymbol: q('sc-actual-symbol')?.value || 'circle',
+      actualSize: parseInt(q('sc-actual-size')?.value || '10'),
+      fittedColor: q('sc-fitted-color')?.value || '#f59e0b',
+      fittedStyle: q('sc-fitted-style')?.value || 'solid',
+      fittedWidth: parseInt(q('sc-fitted-width')?.value || '2'),
+      fittedMarkers: q('sc-fitted-markers')?.checked || false,
+      fittedSymbol: q('sc-fitted-symbol')?.value || 'triangle',
+      fittedSymbolSize: parseInt(q('sc-fitted-msize')?.value || '14'),
+      forecastColor: q('sc-forecast-color')?.value || '#22c55e',
+      forecastStyle: q('sc-forecast-style')?.value || 'dashed',
+      forecastWidth: parseInt(q('sc-forecast-width')?.value || '3'),
+      forecastMarkers: q('sc-forecast-markers')?.checked || false,
+      forecastLabels: q('sc-forecast-labels')?.checked || false,
+      forecastSymbol: q('sc-forecast-symbol')?.value || 'triangle',
+      forecastSymbolSize: parseInt(q('sc-forecast-msize')?.value || '14'),
+      p10Color: q('sc-p10-color')?.value || '#22c55e',
+      p10Line: q('sc-p10-line')?.checked !== false,
+      p10Marker: q('sc-p10-marker')?.checked || false,
+      p10Labels: q('sc-p10-labels')?.checked || false,
+      p10Style: q('sc-p10-style')?.value || 'solid',
+      p90Color: q('sc-p90-color')?.value || '#ef4444',
+      p90Line: q('sc-p90-line')?.checked !== false,
+      p90Marker: q('sc-p90-marker')?.checked || false,
+      p90Labels: q('sc-p90-labels')?.checked || false,
+      p90Style: q('sc-p90-style')?.value || 'solid',
+    };
+  });
+
+  /* Read multi-fit curve styles from dynamic sections */
+  const multiFitStyles = {};
+  card.querySelectorAll('.style-mf-section').forEach(sec => {
+    const mfId = sec.getAttribute('data-mf-id');
+    if (!mfId) return;
+    const q = (cls) => sec.querySelector('.' + cls);
+    multiFitStyles['mf_' + mfId] = {
+      color: q('sc-mf-color')?.value || '#8b5cf6',
+      lineStyle: q('sc-mf-line-style')?.value || 'solid',
+      lineWidth: parseFloat(q('sc-mf-line-width')?.value || '2.5'),
+      showMarkers: q('sc-mf-markers')?.checked || false,
+      markerSymbol: q('sc-mf-symbol')?.value || 'circle',
+      markerSize: parseInt(q('sc-mf-msize')?.value || '8'),
+      showLabels: q('sc-mf-labels')?.checked || false,
+      p10Color: q('sc-mf-p10-color')?.value || '#8b5cf6',
+      p10Line: q('sc-mf-p10-line')?.checked !== false,
+      p10Marker: q('sc-mf-p10-marker')?.checked || false,
+      p10Labels: q('sc-mf-p10-labels')?.checked || false,
+      p10Style: q('sc-mf-p10-style')?.value || 'dotted',
+      p90Color: q('sc-mf-p90-color')?.value || '#8b5cf6',
+      p90Line: q('sc-mf-p90-line')?.checked !== false,
+      p90Marker: q('sc-mf-p90-marker')?.checked || false,
+      p90Labels: q('sc-mf-p90-labels')?.checked || false,
+      p90Style: q('sc-mf-p90-style')?.value || 'dotted',
+    };
+  });
+
+  /* First curve provides backward-compatible top-level defaults */
+  const firstWell = Object.keys(curveStyles)[0];
+  const first = firstWell ? curveStyles[firstWell] : {};
+
   return {
     plotTheme: card.querySelector('.s-plot-theme')?.value || 'classic',
+    curveStyles: curveStyles,
+    multiFitStyles: multiFitStyles,
 
-    actualColor: card.querySelector('.s-actual-color')?.value || '#3b82f6',
-
-    actualSymbol: card.querySelector('.s-actual-symbol')?.value || 'circle',
-
-    actualSize: parseInt(card.querySelector('.s-actual-size')?.value || '10'),
-
-    fittedColor: card.querySelector('.s-fitted-color')?.value || '#f59e0b',
-
-    fittedStyle: card.querySelector('.s-fitted-style')?.value || 'solid',
-
-    fittedWidth: parseInt(card.querySelector('.s-fitted-width')?.value || '2'),
-
-    fittedMarkers: card.querySelector('.s-fitted-markers')?.checked || false,
-
-    fittedSymbol: card.querySelector('.s-fitted-symbol')?.value || 'triangle',
-
-    fittedSymbolSize: parseInt(card.querySelector('.s-fitted-msize')?.value || '14'),
-
-    forecastColor: card.querySelector('.s-forecast-color')?.value || '#22c55e',
-
-    forecastStyle: card.querySelector('.s-forecast-style')?.value || 'dashed',
-
-    forecastWidth: parseInt(card.querySelector('.s-forecast-width')?.value || '3'),
-
-    forecastMarkers: card.querySelector('.s-forecast-markers')?.checked || false,
-
-    forecastLabels: card.querySelector('.s-forecast-labels')?.checked || false,
-
-    forecastSymbol: card.querySelector('.s-forecast-symbol')?.value || 'triangle',
-
-    forecastSymbolSize: parseInt(card.querySelector('.s-forecast-msize')?.value || '14'),
-
-    p10Color: card.querySelector('.s-p10-color')?.value || '#22c55e',
-
-    p10Line: card.querySelector('.s-p10-line')?.checked !== false,
-
-    p10Marker: card.querySelector('.s-p10-marker')?.checked || false,
-
-    p10Labels: card.querySelector('.s-p10-labels')?.checked || false,
-
-    p10Style: card.querySelector('.s-p10-style')?.value || 'solid',
-
-    p90Color: card.querySelector('.s-p90-color')?.value || '#ef4444',
-
-    p90Line: card.querySelector('.s-p90-line')?.checked !== false,
-
-    p90Marker: card.querySelector('.s-p90-marker')?.checked || false,
-
-    p90Labels: card.querySelector('.s-p90-labels')?.checked || false,
-
-    p90Style: card.querySelector('.s-p90-style')?.value || 'solid',
+    actualColor: first.actualColor || '#3b82f6',
+    actualSymbol: first.actualSymbol || 'circle',
+    actualSize: first.actualSize != null ? first.actualSize : 10,
+    fittedColor: first.fittedColor || '#f59e0b',
+    fittedStyle: first.fittedStyle || 'solid',
+    fittedWidth: first.fittedWidth != null ? first.fittedWidth : 2,
+    fittedMarkers: first.fittedMarkers || false,
+    fittedSymbol: first.fittedSymbol || 'triangle',
+    fittedSymbolSize: first.fittedSymbolSize != null ? first.fittedSymbolSize : 14,
+    forecastColor: first.forecastColor || '#22c55e',
+    forecastStyle: first.forecastStyle || 'dashed',
+    forecastWidth: first.forecastWidth != null ? first.forecastWidth : 3,
+    forecastMarkers: first.forecastMarkers || false,
+    forecastLabels: first.forecastLabels || false,
+    forecastSymbol: first.forecastSymbol || 'triangle',
+    forecastSymbolSize: first.forecastSymbolSize != null ? first.forecastSymbolSize : 14,
+    p10Color: first.p10Color || '#22c55e',
+    p10Line: first.p10Line !== false,
+    p10Marker: first.p10Marker || false,
+    p10Labels: first.p10Labels || false,
+    p10Style: first.p10Style || 'solid',
+    p90Color: first.p90Color || '#ef4444',
+    p90Line: first.p90Line !== false,
+    p90Marker: first.p90Marker || false,
+    p90Labels: first.p90Labels || false,
+    p90Style: first.p90Style || 'solid',
 
     gridX: card.querySelector('.s-grid-x')?.checked !== false,
 
@@ -2208,57 +2575,16 @@ function applyStylesToCard(cardId, styles) {
 
   s('.s-plot-theme', merged.plotTheme || 'classic');
 
-  s('.s-actual-color', merged.actualColor);
+  /* Store curveStyles and multiFitStyles so rebuildCurveStyleSections can pick them up */
+  if (merged.curveStyles || merged.multiFitStyles) {
+    const existing = cardStyles[cardId] || {};
+    if (merged.curveStyles) existing.curveStyles = merged.curveStyles;
+    if (merged.multiFitStyles) existing.multiFitStyles = merged.multiFitStyles;
+    cardStyles[cardId] = { ...merged, ...existing, curveStyles: merged.curveStyles || existing.curveStyles, multiFitStyles: merged.multiFitStyles || existing.multiFitStyles };
+  }
 
-  s('.s-actual-symbol', merged.actualSymbol);
-
-  s('.s-actual-size', merged.actualSize);
-
-  s('.s-fitted-color', merged.fittedColor);
-
-  s('.s-fitted-style', merged.fittedStyle);
-
-  s('.s-fitted-width', merged.fittedWidth);
-
-  const ftm = card.querySelector('.s-fitted-markers'); if (ftm) ftm.checked = merged.fittedMarkers || false;
-
-  s('.s-fitted-symbol', merged.fittedSymbol);
-
-  s('.s-fitted-msize', merged.fittedSymbolSize);
-
-  s('.s-forecast-color', merged.forecastColor);
-
-  s('.s-forecast-style', merged.forecastStyle);
-
-  s('.s-forecast-width', merged.forecastWidth);
-
-  const fcm = card.querySelector('.s-forecast-markers'); if (fcm) fcm.checked = merged.forecastMarkers || false;
-
-  const fcl = card.querySelector('.s-forecast-labels'); if (fcl) fcl.checked = merged.forecastLabels || false;
-
-  s('.s-forecast-symbol', merged.forecastSymbol);
-
-  s('.s-forecast-msize', merged.forecastSymbolSize);
-
-  s('.s-p10-color', merged.p10Color || '#22c55e');
-
-  const p10l = card.querySelector('.s-p10-line'); if (p10l) p10l.checked = merged.p10Line !== false;
-
-  const p10m = card.querySelector('.s-p10-marker'); if (p10m) p10m.checked = merged.p10Marker || false;
-
-  const p10lb = card.querySelector('.s-p10-labels'); if (p10lb) p10lb.checked = merged.p10Labels || false;
-
-  s('.s-p10-style', merged.p10Style);
-
-  s('.s-p90-color', merged.p90Color || '#ef4444');
-
-  const p90l = card.querySelector('.s-p90-line'); if (p90l) p90l.checked = merged.p90Line !== false;
-
-  const p90m = card.querySelector('.s-p90-marker'); if (p90m) p90m.checked = merged.p90Marker || false;
-
-  const p90lb = card.querySelector('.s-p90-labels'); if (p90lb) p90lb.checked = merged.p90Labels || false;
-
-  s('.s-p90-style', merged.p90Style);
+  /* Rebuild dynamic curve sections (they will read from cardStyles[cardId].curveStyles) */
+  rebuildCurveStyleSections(cardId);
 
   const gx = card.querySelector('.s-grid-x'); if (gx) gx.checked = merged.gridX !== false;
 
@@ -2380,6 +2706,7 @@ async function runSingleDCA(cardId) {
 
     cardLastData[cardId] = data;
 
+    rebuildCurveStyleSections(cardId);
     cardStyles[cardId] = readCardStyles(cardId);
 
     /* Re-insert saved Qi anchor points into fresh data, then refit */
@@ -3124,10 +3451,39 @@ function updatePCurveSeries(cardId, myChart, curveKeyOverride) {
         const yVal = evalDeclineModel(mf.model, w.t[i], pParams);
         pData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], yVal]);
       }
+      /* Extend dynamically: mfTMax + current forecastMonths */
+      const _pFcMonths = parseFloat(document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+      const mfTMaxP = mf.indices && mf.indices.length > 0
+        ? Math.max(...mf.indices.filter(i => i < w.t.length).map(i => w.t[i]))
+        : null;
+      if (_pFcMonths && mfTMaxP != null) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = isDate ? parseDateStr(w.x[0]) : 0;
+        const tOffset = w.t[0] || 0;
+        const x0 = w.x[0] || 0;
+        const nM = Math.round(_pFcMonths);
+        for (let fi = 1; fi <= nM; fi++) {
+          const tVal = mfTMaxP + 30.4375 * fi;
+          const yVal = evalDeclineModel(mf.model, tVal, pParams);
+          if (isDate) {
+            pData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+          } else {
+            pData.push([tVal - tOffset + x0, yVal]);
+          }
+        }
+      }
 
-      lineObj = { color: mf.color, width: 1.5, type: 'dotted' };
-      itemObj = { color: mf.color, opacity: 0.6 };
-      s.showSymbol = false;
+      const mfStylesObj = st.multiFitStyles || {};
+      const ms = mfStylesObj[curveKey] || {};
+      const mfBaseColor = ms.color || mf.color;
+      const pColor = which === 'p10' ? (ms.p10Color || mfBaseColor) : (ms.p90Color || mfBaseColor);
+      const pStyle = which === 'p10' ? (ms.p10Style || 'dotted') : (ms.p90Style || 'dotted');
+
+      lineObj = { color: pColor, width: 1.5, type: pStyle };
+      itemObj = { color: pColor, opacity: 0.6 };
+      s.showSymbol = which === 'p10' ? (ms.p10Marker || false) : (ms.p90Marker || false);
+      const mfLabelKey = which === 'p10' ? 'p10Labels' : 'p90Labels';
+      s.label = ms[mfLabelKey] ? { show: true, position: 'top', formatter: (p) => { let v = Array.isArray(p.data) ? p.data[1] : p.data; return (typeof v === 'number') ? v.toFixed(1) : ''; }, fontSize: 9 } : { show: false };
     }
 
     s.name = targetName;
@@ -3495,31 +3851,52 @@ function updateQiDisplay(cardId) {
 
     const modelName = (data.model || '').toLowerCase();
 
+    const multiFits = cardMultiFits[cardId] || [];
+
+    const st = cardStyles[cardId] || {};
+
+    const mfStylesObj = st.multiFitStyles || {};
+
+    const mainColor = (st.curveStyles && st.curveStyles[w.well || 'default'] || {}).fittedColor || st.fittedColor || '#f59e0b';
+
+    const buildEq = (model, params, color) => {
+
+      const mn = (model || '').toLowerCase();
+
+      let fitted = '';
+
+      if (mn === 'exponential') fitted = `q(t) = ${fmt(p.qi)} &middot; e<sup>&minus;${fmt(params.di)}&middot;t</sup>`;
+
+      else if (mn === 'hyperbolic') fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.b)}&middot;${fmt(params.di)}&middot;t)<sup>1/${fmt(params.b)}</sup>`;
+
+      else if (mn === 'harmonic') fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.di)}&middot;t)`;
+
+      return fitted ? `<span class="formula-fitted" style="color:${color}">${fitted}</span>` : '';
+
+    };
+
     let formulaHtml = '';
 
-    if (modelName === 'exponential') {
+    const wName = data?.wells?.[0]?.well || 'Fitted';
+    const label = multiFits.length > 0 ? wName : '';
 
-      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> &middot; e<sup>&minus;d<sub>i</sub>&middot;t</sup></span>`
+    if (label) formulaHtml += `<span class="formula-label" style="color:${mainColor}">&#9679; ${label} (${data.model})</span>`;
 
-        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} &middot; e<sup>&minus;${fmt(p.di)}&middot;t</sup></span>`;
+    formulaHtml += buildEq(modelName, p, mainColor);
 
-    } else if (modelName === 'hyperbolic') {
+    multiFits.forEach(mf => {
 
-      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + b&middot;d<sub>i</sub>&middot;t)<sup>1/b</sup></span>`
+      if (!mf.params) return;
 
-        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.b)}&middot;${fmt(p.di)}&middot;t)<sup>1/${fmt(p.b)}</sup></span>`;
+      const ms = mfStylesObj['mf_' + mf.id] || {};
 
-    } else if (modelName === 'harmonic') {
+      const mfColor = ms.color || mf.color || '#8b5cf6';
 
-      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + d<sub>i</sub>&middot;t)</span>`
+      formulaHtml += `<span class="formula-label" style="color:${mfColor}">&#9679; Curve #${mf.id} (${mf.model})</span>`;
 
-        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.di)}&middot;t)</span>`;
+      formulaHtml += buildEq(mf.model, mf.params, mfColor);
 
-    } else {
-
-      formulaHtml = `<span class="formula-fitted">${w.equation}</span>`;
-
-    }
+    });
 
     formulaDiv.innerHTML = formulaHtml;
 
@@ -3917,47 +4294,53 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   const formulaDiv = document.getElementById('formula-' + cardId);
 
-  if (formulaDiv && firstW.equation && firstW.params) {
-
-    const modelName = (data.model || '').toLowerCase();
-
-    let formulaHtml = '';
-
-    const p = firstW.params;
+  if (formulaDiv) {
 
     const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
 
-    if (modelName === 'exponential') {
+    const buildEqHtml = (model, params, color) => {
+      const mn = (model || '').toLowerCase();
+      let fitted = '';
+      if (mn === 'exponential') {
+        fitted = `q(t) = ${fmt(params.qi)} &middot; e<sup>&minus;${fmt(params.di)}&middot;t</sup>`;
+      } else if (mn === 'hyperbolic') {
+        fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.b)}&middot;${fmt(params.di)}&middot;t)<sup>1/${fmt(params.b)}</sup>`;
+      } else if (mn === 'harmonic') {
+        fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.di)}&middot;t)`;
+      }
+      return fitted ? `<span class="formula-fitted" style="color:${color}">${fitted}</span>` : '';
+    };
 
-      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> &middot; e<sup>&minus;d<sub>i</sub>&middot;t</sup></span>`
+    let formulaHtml = '';
+    const multiFits = cardMultiFits[cardId] || [];
+    const st = cardStyles[cardId] || {};
+    const mfStylesObj = st.multiFitStyles || {};
 
-        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} &middot; e<sup>&minus;${fmt(p.di)}&middot;t</sup></span>`;
-
-    } else if (modelName === 'hyperbolic') {
-
-      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + b&middot;d<sub>i</sub>&middot;t)<sup>1/b</sup></span>`
-
-        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.b)}&middot;${fmt(p.di)}&middot;t)<sup>1/${fmt(p.b)}</sup></span>`;
-
-    } else if (modelName === 'harmonic') {
-
-      formulaHtml = `<span class="formula-generic">q(t) = q<sub>i</sub> / (1 + d<sub>i</sub>&middot;t)</span>`
-
-        + `<span class="formula-fitted">q(t) = ${fmt(p.qi)} / (1 + ${fmt(p.di)}&middot;t)</span>`;
-
-    } else {
-
-      formulaHtml = `<span class="formula-fitted">${firstW.equation}</span>`;
-
+    /* Main fit equation */
+    if (firstW.equation && firstW.params) {
+      const modelName = (data.model || '').toLowerCase();
+      const mainColor = (st.curveStyles && st.curveStyles[firstW.well || 'default'] || {}).fittedColor || st.fittedColor || '#f59e0b';
+      const wName = firstW.well || 'Fitted';
+      const label = multiFits.length > 0 ? wName : '';
+      if (label) formulaHtml += `<span class="formula-label" style="color:${mainColor}">&#9679; ${label} (${data.model})</span>`;
+      formulaHtml += buildEqHtml(modelName, firstW.params, mainColor);
     }
 
-    formulaDiv.innerHTML = formulaHtml;
+    /* Multi-fit curve equations */
+    multiFits.forEach(mf => {
+      if (!mf.params) return;
+      const ms = mfStylesObj['mf_' + mf.id] || {};
+      const mfColor = ms.color || mf.color || '#8b5cf6';
+      formulaHtml += `<span class="formula-label" style="color:${mfColor}">&#9679; Curve #${mf.id} (${mf.model})</span>`;
+      formulaHtml += buildEqHtml(mf.model, mf.params, mfColor);
+    });
 
-    formulaDiv.style.display = '';
-
-  } else if (formulaDiv) {
-
-    formulaDiv.style.display = 'none';
+    if (formulaHtml) {
+      formulaDiv.innerHTML = formulaHtml;
+      formulaDiv.style.display = '';
+    } else {
+      formulaDiv.style.display = 'none';
+    }
 
   }
 
@@ -4059,11 +4442,22 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   allWellsData.forEach((w, wIdx) => {
 
-    const wColor = isSingle ? st.actualColor : wellColors[wIdx % wellColors.length];
+    /* Per-curve styles: look up by well name, fall back to top-level st */
+    const cs = (st.curveStyles && st.curveStyles[w.well]) || st;
 
-    const wFitColor = isSingle ? st.fittedColor : wColor;
+    const wColor = cs.actualColor || st.actualColor;
 
-    const wFcColor = isSingle ? st.forecastColor : wColor;
+    const wFitColor = cs.fittedColor || st.fittedColor;
+
+    const wFcColor = cs.forecastColor || st.forecastColor;
+
+    const wActualSymbol = cs.actualSymbol || st.actualSymbol;
+    const wActualSize = cs.actualSize != null ? cs.actualSize : st.actualSize;
+    const wFittedStyle = cs.fittedStyle || st.fittedStyle;
+    const wFittedWidth = cs.fittedWidth != null ? cs.fittedWidth : st.fittedWidth;
+    const wFittedMarkers = cs.fittedMarkers != null ? cs.fittedMarkers : st.fittedMarkers;
+    const wFittedSymbol = cs.fittedSymbol || st.fittedSymbol;
+    const wFittedSymbolSize = cs.fittedSymbolSize != null ? cs.fittedSymbolSize : st.fittedSymbolSize;
 
     const prefix = isSingle ? '' : w.well + ' ';
 
@@ -4101,11 +4495,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       }
 
-      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: incD });
+      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: wActualSize, symbol: wActualSymbol, itemStyle: { color: wColor }, data: incD });
 
-      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: wActualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
-      if (isSingle && anchorD.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD, z: 10 });
+      if (isSingle && anchorD.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: wActualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD, z: 10 });
 
       if (isSingle && wIdx === 0) {
         mfIndexMeta.forEach(m => {
@@ -4114,7 +4508,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
             series.push({
               name: '_mfinc_' + m.id,
               type: 'scatter',
-              symbolSize: Math.max(st.actualSize - 1, 6),
+              symbolSize: Math.max(wActualSize - 1, 6),
               symbol: 'circle',
               z: 6,
               itemStyle: { color: m.color, borderColor: '#ffffff', borderWidth: 1.2 },
@@ -4140,12 +4534,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
         series.push({
           name: prefix + 'Fitted',
           type: 'line',
-          showSymbol: st.fittedMarkers,
-          symbol: st.fittedSymbol,
-          symbolSize: st.fittedSymbolSize,
+          showSymbol: wFittedMarkers,
+          symbol: wFittedSymbol,
+          symbolSize: wFittedSymbolSize,
           smooth: false,
-          lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
+          lineStyle: { color: wFitColor, width: wFittedWidth, type: wFittedStyle },
           itemStyle: { color: wFitColor },
+          label: wFittedMarkers ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: combinedData
         });
 
@@ -4171,11 +4566,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
         else incD.push(pt);
       }
 
-      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: st.actualSize, symbol: st.actualSymbol, itemStyle: { color: wColor }, data: incD });
+      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: wActualSize, symbol: wActualSymbol, itemStyle: { color: wColor }, data: incD });
 
-      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: st.actualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: wActualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
-      if (isSingle && anchorD2.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: st.actualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD2, z: 10 });
+      if (isSingle && anchorD2.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: wActualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD2, z: 10 });
 
       if (isSingle && wIdx === 0) {
         mfIndexMeta.forEach(m => {
@@ -4184,7 +4579,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
             series.push({
               name: '_mfinc_' + m.id,
               type: 'scatter',
-              symbolSize: Math.max(st.actualSize - 1, 6),
+              symbolSize: Math.max(wActualSize - 1, 6),
               symbol: 'circle',
               z: 6,
               itemStyle: { color: m.color, borderColor: '#ffffff', borderWidth: 1.2 },
@@ -4208,12 +4603,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
         series.push({
           name: prefix + 'Fitted',
           type: 'line',
-          showSymbol: st.fittedMarkers,
-          symbol: st.fittedSymbol,
-          symbolSize: st.fittedSymbolSize,
+          showSymbol: wFittedMarkers,
+          symbol: wFittedSymbol,
+          symbolSize: wFittedSymbolSize,
           smooth: false,
-          lineStyle: { color: wFitColor, width: st.fittedWidth, type: st.fittedStyle },
+          lineStyle: { color: wFitColor, width: wFittedWidth, type: wFittedStyle },
           itemStyle: { color: wFitColor },
+          label: wFittedMarkers ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: combinedData
         });
       }
@@ -4228,29 +4624,34 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     if (ps && ps.enabled && w.y_fitted && w.params && w.t) {
 
-      const P10_COLOR = st.p10Color || '#22c55e', P90_COLOR = st.p90Color || '#ef4444';
+      const P10_COLOR = cs.p10Color || st.p10Color || '#22c55e', P90_COLOR = cs.p90Color || st.p90Color || '#ef4444';
 
-      const p10ShowLine = st.p10Line !== false, p10ShowMarker = st.p10Marker || false;
-      const p90ShowLine = st.p90Line !== false, p90ShowMarker = st.p90Marker || false;
+      const p10ShowLine = (cs.p10Line != null ? cs.p10Line : st.p10Line) !== false, p10ShowMarker = (cs.p10Marker != null ? cs.p10Marker : st.p10Marker) || false;
+      const p90ShowLine = (cs.p90Line != null ? cs.p90Line : st.p90Line) !== false, p90ShowMarker = (cs.p90Marker != null ? cs.p90Marker : st.p90Marker) || false;
       const p10DiRound = Math.round(ps.p10Di * 1e6) / 1e6;
       const p90DiRound = Math.round(ps.p90Di * 1e6) / 1e6;
 
       const p10Data = buildPCurveData(w, data, ps.p10Di, isDate, null);
       const p90Data = buildPCurveData(w, data, ps.p90Di, isDate, null);
 
+      const wP10Labels = cs.p10Labels != null ? cs.p10Labels : st.p10Labels;
+      const wP10Style = cs.p10Style || st.p10Style || 'solid';
+      const wP90Labels = cs.p90Labels != null ? cs.p90Labels : st.p90Labels;
+      const wP90Style = cs.p90Style || st.p90Style || 'solid';
+
       series.push({
         id: 'p10|main',
         name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
-        lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: st.p10Style || 'solid' }, itemStyle: { color: P10_COLOR },
-        label: st.p10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+        lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: wP10Style }, itemStyle: { color: P10_COLOR },
+        label: wP10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
         data: p10Data
       });
 
       series.push({
         id: 'p90|main',
         name: prefix + 'P90 (Di=' + p90DiRound + ')', type: 'line', z: 1, showSymbol: p90ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
-        lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: st.p90Style || 'solid' }, itemStyle: { color: P90_COLOR },
-        label: st.p90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+        lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: wP90Style }, itemStyle: { color: P90_COLOR },
+        label: wP90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
         data: p90Data
       });
 
@@ -4374,27 +4775,60 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   /* ---- Multi-fit additional curves ---- */
   const multiFits = cardMultiFits[cardId];
+  const _fcMonths = parseFloat(forecastMonths) || 0;
   if (multiFits && multiFits.length > 0) {
+    const mfStylesObj = st.multiFitStyles || {};
     multiFits.forEach((mf, mfIdx) => {
+      const mfKey = 'mf_' + mf.id;
+      const ms = mfStylesObj[mfKey] || {};
+      const mfColor = ms.color || mf.color;
+      const mfLineStyle = ms.lineStyle || 'solid';
+      const mfLineWidth = ms.lineWidth != null ? ms.lineWidth : 2.5;
       const mfName = 'Curve #' + mf.id + ' (' + mf.model + ')';
-      /* Combine fitted + forecast into a single series */
+
+      /* Latest t value among included indices */
+      const mfW0 = allWellsData[0];
+      const mfTMax = mf.indices && mf.indices.length > 0 && mfW0
+        ? Math.max(...mf.indices.filter(i => i < mfW0.t.length).map(i => mfW0.t[i]))
+        : (mf.fittedData && mf.fittedData.length > 0 ? null : null);
+
+      /* Build dynamic forecast for this curve based on current forecastMonths */
+      const buildMfForecast = () => {
+        if (!_fcMonths || !mf.params || mfTMax == null) return [];
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = isDate ? parseDateStr(mfW0.x[0]) : 0;
+        const tOffset = mfW0 ? (mfW0.t[0] || 0) : 0;
+        const x0 = mfW0 ? (mfW0.x[0] || 0) : 0;
+        const pts = [];
+        const nMonths = Math.round(_fcMonths);
+        for (let i = 1; i <= nMonths; i++) {
+          const tVal = mfTMax + 30.4375 * i;
+          const yVal = evalDeclineModel(mf.model, tVal, mf.params);
+          if (isDate) {
+            pts.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+          } else {
+            pts.push([tVal - tOffset + x0, yVal]);
+          }
+        }
+        return pts;
+      };
+
+      /* Combine fitted + dynamic forecast */
       let mfCombined = [];
       if (mf.fittedData && mf.fittedData.length > 0) mfCombined = [...mf.fittedData];
-      if (mf.forecastData && mf.forecastData.length > 0) {
-        /* forecastData may already have bridge point (first element = last fitted), skip duplicate */
-        const startIdx = (mfCombined.length > 0 && mf.forecastData.length > 0 &&
-          mf.forecastData[0][0] === mfCombined[mfCombined.length - 1][0] &&
-          mf.forecastData[0][1] === mfCombined[mfCombined.length - 1][1]) ? 1 : 0;
-        for (let fi = startIdx; fi < mf.forecastData.length; fi++) mfCombined.push(mf.forecastData[fi]);
-      }
+      const dynForecast = buildMfForecast();
+      if (dynForecast.length > 0) mfCombined = mfCombined.concat(dynForecast);
       if (mfCombined.length > 0) {
         series.push({
           name: mfName,
           type: 'line',
-          showSymbol: false,
+          showSymbol: ms.showMarkers || false,
+          symbol: ms.markerSymbol || 'circle',
+          symbolSize: ms.markerSize != null ? ms.markerSize : 8,
           smooth: false,
-          lineStyle: { color: mf.color, width: 2.5, type: 'solid' },
-          itemStyle: { color: mf.color },
+          lineStyle: { color: mfColor, width: mfLineWidth, type: mfLineStyle },
+          itemStyle: { color: mfColor },
+          label: ms.showLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: mfCombined,
           z: 5,
         });
@@ -4421,17 +4855,39 @@ function renderSingleChart(cardId, data, forecastMonths) {
                 pData.push([mfW.x[i], yVal]);
               }
             }
+            /* Extend dynamically: mfTMax + forecastMonths months */
+            if (_fcMonths && mfTMax != null) {
+              const MS_PER_DAY = 86400000;
+              const firstDateMs = isDate ? parseDateStr(mfW.x[0]) : 0;
+              const tOffset = mfW.t[0] || 0;
+              const x0 = mfW.x[0] || 0;
+              const nM = Math.round(_fcMonths);
+              for (let i = 1; i <= nM; i++) {
+                const tVal = mfTMax + 30.4375 * i;
+                const yVal = evalDeclineModel(mf.model, tVal, pParams);
+                if (isDate) {
+                  pData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+                } else {
+                  pData.push([tVal - tOffset + x0, yVal]);
+                }
+              }
+            }
             return pData;
           };
           const mfP10Data = makeMultiFitPCurve(mfP10Di);
           const mfP90Data = makeMultiFitPCurve(mfP90Di);
+          const mfP10Color = ms.p10Color || mfColor;
+          const mfP10Style = ms.p10Style || 'dotted';
+          const mfP90Color = ms.p90Color || mfColor;
+          const mfP90Style = ms.p90Style || 'dotted';
           if (mfP10Data.length > 0) {
             series.push({
               id: 'p10|mf_' + mf.id,
               name: mfName + ' P10',
-              type: 'line', z: 1, showSymbol: false, smooth: false,
-              lineStyle: { color: mf.color, width: 1.5, type: 'dotted' },
-              itemStyle: { color: mf.color, opacity: 0.6 },
+              type: 'line', z: 1, showSymbol: ms.p10Marker || false, symbol: 'circle', symbolSize: 6, smooth: false,
+              lineStyle: { color: mfP10Color, width: 1.5, type: mfP10Style },
+              itemStyle: { color: mfP10Color, opacity: 0.6 },
+              label: ms.p10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
               data: mfP10Data,
             });
           }
@@ -4439,9 +4895,10 @@ function renderSingleChart(cardId, data, forecastMonths) {
             series.push({
               id: 'p90|mf_' + mf.id,
               name: mfName + ' P90',
-              type: 'line', z: 1, showSymbol: false, smooth: false,
-              lineStyle: { color: mf.color, width: 1.5, type: 'dotted' },
-              itemStyle: { color: mf.color, opacity: 0.6 },
+              type: 'line', z: 1, showSymbol: ms.p90Marker || false, symbol: 'circle', symbolSize: 6, smooth: false,
+              lineStyle: { color: mfP90Color, width: 1.5, type: mfP90Style },
+              itemStyle: { color: mfP90Color, opacity: 0.6 },
+              label: ms.p90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
               data: mfP90Data,
             });
           }
@@ -4663,7 +5120,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
         return;
       }
 
-      if (!params.seriesName.endsWith('Actual') && params.seriesName !== 'Excluded') return;
+      if (!params.seriesName.endsWith('Actual') && params.seriesName !== 'Excluded') {
+        /* Click on a fitted/forecast/multi-fit line → open its style section */
+        if (params.seriesName && !params.seriesName.startsWith('_')) {
+          highlightStyleSection(cardId, params.seriesName);
+        }
+        return;
+      }
 
       let idx;
 
@@ -4681,7 +5144,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   } else {
 
-    /* Multi-well mode: still handle annotation clicks */
+    /* Multi-well mode: handle annotation clicks + style section highlight */
 
     myChart.on('click', function (params) {
 
@@ -4695,6 +5158,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
         if (idx >= 0) showAnnotationEditor(cardId, idx, params.event);
 
+        return;
+
+      }
+
+      /* Click on any series → open its style section */
+      if (params.seriesName && !params.seriesName.startsWith('_')) {
+        highlightStyleSection(cardId, params.seriesName);
       }
 
     });
@@ -4899,7 +5369,7 @@ function renderCurveSummaryTable(cardId, data) {
   const rows = [];
 
   wells.forEach((w) => {
-    const prefix = wells.length === 1 ? 'Main Fit' : (w.well + ' Main Fit');
+    const prefix = wells.length === 1 ? (w.well || 'Fitted') : w.well;
     const fittedName = wells.length === 1 ? 'Fitted' : (w.well + ' Fitted');
     if (hiddenSet.has(fittedName)) return;
 
@@ -5547,14 +6017,14 @@ async function addCurveFitFromMultiSelect(cardId, selectedSet) {
 }
 
 /* Core: fit a curve to a subset of points and add it to the multi-fit list */
-async function _performMultiFit(cardId, indices) {
+async function _performMultiFit(cardId, indices, modelOverride) {
   const lastData = cardLastData[cardId];
   const w = lastData.wells[0];
   const isDate = w.is_date || false;
 
-  // Get model from the card
+  // Get model — use explicit override if given, else fall back to card selector
   const card = document.getElementById(cardId);
-  const model = card?.querySelector('.p-model')?.value || lastData.model || 'exponential';
+  const model = modelOverride || card?.querySelector('.p-model')?.value || lastData.model || 'exponential';
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
 
   // Build t and y arrays for the selected indices
@@ -5640,8 +6110,12 @@ async function _performMultiFit(cardId, indices) {
       color: MULTI_FIT_COLORS[colorIdx],
       fittedData: fittedData,
       forecastData: forecastData,
+      forecast_t: fit.forecast_t || [],
     };
     cardMultiFits[cardId].push(curveFit);
+
+    // Rebuild style sections to include the new multi-fit curve
+    rebuildCurveStyleSections(cardId);
 
     // Re-render chart and update management panel
     saveZoomState(cardId);
@@ -5658,6 +6132,106 @@ async function _performMultiFit(cardId, indices) {
 }
 
 /* Remove a specific curve */
+/* Re-fit a multi-fit curve with a different model */
+async function changeMultiFitModel(cardId, mfId, newModel) {
+  const fits = cardMultiFits[cardId];
+  if (!fits) return;
+  const mf = fits.find(f => f.id === parseInt(mfId));
+  if (!mf) return;
+  const indices = mf.indices;
+  if (!indices || indices.length < 3) {
+    showToast('Need at least 3 data points to re-fit', 'warning');
+    return;
+  }
+
+  const lastData = cardLastData[cardId];
+  const w = lastData?.wells?.[0];
+  if (!w) return;
+  const isDate = w.is_date || false;
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+
+  const tFit = [], yFit = [];
+  for (const i of indices) {
+    if (i < w.t.length && w.y_actual[i] != null) {
+      tFit.push(w.t[i]);
+      yFit.push(w.y_actual[i]);
+    }
+  }
+  if (tFit.length < 3) { showToast('Not enough valid data points', 'warning'); return; }
+
+  try {
+    const res = await fetch('/api/fit_inline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t: tFit, y: yFit, model: newModel, forecast_months: forecastMonths }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.detail || 'Re-fit failed', 'error');
+      return;
+    }
+    const fit = await res.json();
+
+    /* Rebuild fitted data */
+    const tMin = Math.min(...tFit), tMax = Math.max(...tFit);
+    const fittedData = [];
+    const nPts = Math.max(100, indices.length * 2);
+    const step = (tMax - tMin) / (nPts - 1);
+    for (let i = 0; i < nPts; i++) {
+      const tVal = tMin + step * i;
+      const yVal = evalDeclineModel(newModel, tVal, fit.params);
+      if (isDate) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = parseDateStr(w.x[0]);
+        const tOffset = w.t[0] || 0;
+        fittedData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+      } else {
+        const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+        fittedData.push([tVal - t0 + x0, yVal]);
+      }
+    }
+
+    /* Update the curveFit object in-place */
+    mf.model = newModel;
+    mf.params = fit.params;
+    mf.equation = fit.equation || '';
+    mf.fittedData = fittedData;
+    mf.forecast_t = fit.forecast_t || [];
+
+    rebuildCurveStyleSections(cardId);
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+    updateMultiFitPanel(cardId);
+
+    const fmt = (v) => typeof v === 'number' ? v.toFixed(4) : v;
+    showToast('Curve #' + mf.id + ' re-fit as ' + newModel + ' (qi=' + fmt(fit.params.qi) + ')', 'success', 3000);
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+  } catch (e) {
+    showToast('Re-fit failed: ' + e.message, 'error');
+  }
+}
+
+/* Re-fit the main curve with a different model */
+async function changeMainFitModel(cardId, newModel) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  /* Update the model selector dropdown to the new model */
+  const modelSel = card.querySelector('.p-model');
+  if (modelSel) modelSel.value = newModel;
+  /* Trigger a re-fit by calling runSingleDCA */
+  await runSingleDCA(cardId);
+}
+
+/* Dispatcher: change model for any curve type */
+function changeCurveModel(cardId, type, id, newModel) {
+  if (type === 'main') {
+    changeMainFitModel(cardId, newModel);
+  } else {
+    changeMultiFitModel(cardId, id, newModel);
+  }
+}
+
 function removeCurve(cardId, type, id) {
   if (type === 'multi') {
     const fits = cardMultiFits[cardId];
@@ -5682,6 +6256,7 @@ function removeCurve(cardId, type, id) {
     if (cardPCurveState[cardId]) delete cardPCurveState[cardId]['main'];
   }
 
+  rebuildCurveStyleSections(cardId);
   const data = cardLastData[cardId];
   const card = document.getElementById(cardId);
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
@@ -5701,6 +6276,7 @@ function clearAllMultiFits(cardId) {
       if (key.startsWith('mf_')) delete cardPCurveState[cardId][key];
     }
   }
+  rebuildCurveStyleSections(cardId);
   const data = cardLastData[cardId];
   const card = document.getElementById(cardId);
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
@@ -5733,9 +6309,10 @@ function updateMultiFitPanel(cardId) {
     const prefix = isSingle ? '' : w.well + ' ';
     const fittedName = prefix + 'Fitted';
     if (w.y_fitted || (w.forecast && w.forecast.x && w.forecast.x.length > 0)) {
-      const st = cardStyles[cardId] || getDefaultStyle();
+      const st = cardStyles[cardId] || getDefaultStyles();
       const wellColors = getPlotThemePalette(st.plotTheme);
-      const fitColor = isSingle ? st.fittedColor : wellColors[wIdx % wellColors.length];
+      const cs = (st.curveStyles && st.curveStyles[w.well]) || {};
+      const fitColor = isSingle ? (cs.fittedColor || st.fittedColor) : (cs.fittedColor || wellColors[wIdx % wellColors.length]);
       const params = w.params || {};
       const model = lastData?.model || 'exponential';
 
@@ -5753,7 +6330,7 @@ function updateMultiFitPanel(cardId) {
         type: 'main',
         id: '',
         name: fittedName,
-        label: (prefix || '') + 'Main Fit',
+        label: (isSingle ? (w.well || 'Fitted') : w.well) + ' (' + model + ')',
         model: model,
         params: params,
         color: fitColor,
@@ -5764,8 +6341,11 @@ function updateMultiFitPanel(cardId) {
   });
 
   /* Additional multi-fit curves */
+  const mfStylesObj = (cardStyles[cardId] || {}).multiFitStyles || {};
   fits.forEach(f => {
     const mfName = 'Curve #' + f.id + ' (' + f.model + ')';
+    const ms = mfStylesObj['mf_' + f.id] || {};
+    const mfDisplayColor = ms.color || f.color;
     const ps = pcs['mf_' + f.id];
     const subSeries = [mfName];
     if (ps && ps.enabled && f.params) {
@@ -5780,7 +6360,7 @@ function updateMultiFitPanel(cardId) {
       label: 'Curve #' + f.id,
       model: f.model,
       params: f.params,
-      color: f.color,
+      color: mfDisplayColor,
       subSeries: subSeries,
       isHidden: isHidden,
     });
@@ -5814,9 +6394,18 @@ function updateMultiFitPanel(cardId) {
       actionsHtml += '<button class="mf-hide" onclick="hideCurveFromPanel(\'' + cardId + '\', ' + JSON.stringify(c.subSeries).replace(/'/g, "\\'").replace(/"/g, '&quot;') + ')" title="Hide this curve from plot">Hide</button>';
     }
 
+    /* Model selector dropdown for this curve */
+    const modelOpts = ['exponential', 'hyperbolic', 'harmonic'];
+    let modelSelectHtml = '<select class="mf-model-select" data-type="' + c.type + '" data-id="' + c.id + '" onchange="changeCurveModel(\'' + cardId + '\', \'' + c.type + '\', \'' + c.id + '\', this.value)">';
+    modelOpts.forEach(m => {
+      modelSelectHtml += '<option value="' + m + '"' + (m === c.model ? ' selected' : '') + '>' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>';
+    });
+    modelSelectHtml += '</select>';
+
     html += '<div class="mf-item' + hiddenCls + '">'
       + '<span class="mf-color-dot" style="background:' + c.color + ';"></span>'
-      + '<span class="mf-label">' + eyeIcon + c.label + ' <span class="mf-model">' + c.model + '</span></span>'
+      + '<span class="mf-label">' + eyeIcon + c.label + '</span>'
+      + modelSelectHtml
       + '<span class="mf-params">' + paramStr + '</span>'
       + actionsHtml
       + '</div>';
@@ -5878,6 +6467,7 @@ function clearAllCurvesFromPanel(cardId) {
     });
   }
 
+  rebuildCurveStyleSections(cardId);
   const card = document.getElementById(cardId);
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
   if (lastData) {
@@ -6150,6 +6740,7 @@ function applyTemplate(tplId) {
   // If we have stored DCA data, restore and render directly
   if (tpl.lastData) {
     cardLastData[cardId] = JSON.parse(JSON.stringify(tpl.lastData));
+    rebuildCurveStyleSections(cardId);
     const card = document.getElementById(cardId);
     if (card) {
       card.querySelector('.chart-area').style.display = 'block';
@@ -8990,6 +9581,7 @@ async function loadWorkspaceFromFile() {
         const savedData = fileCardData[cs.cardId];
         if (savedData) {
           cardLastData[newId] = savedData;
+          rebuildCurveStyleSections(newId);
           try {
             renderSingleChart(newId, savedData, cs.forecast);
           } catch (e) {
@@ -11078,6 +11670,7 @@ async function loadWorkspace() {
       const savedData = cardData[c.cardId];
       if (savedData && serverHasData) {
         cardLastData[cardId] = savedData;
+        rebuildCurveStyleSections(cardId);
         try {
           renderSingleChart(cardId, savedData, c.forecast);
         } catch (e) {
