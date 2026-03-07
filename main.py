@@ -927,8 +927,8 @@ async def decline_curve_analysis(
 # Inline re-fit endpoint (used when user adds an anchor point client-side)
 # ---------------------------------------------------------------------------
 class FitInlineRequest(BaseModel):
-    t: list[float]
-    y: list[float]
+    t: List[float]
+    y: List[float]
     model: str
     forecast_months: float = 0.0
 
