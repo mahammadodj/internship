@@ -56,17 +56,39 @@ document.getElementById('themeToggle').addEventListener('click', function () {
 
   const isDark = !root.hasAttribute('data-theme');
 
+  const content = this.querySelector('.theme-btn-content');
+
   if (isDark) {
 
     root.setAttribute('data-theme', 'light');
 
-    this.textContent = '☀️ Light';
+    if (content) {
+      content.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg> Light`;
+    } else {
+      this.textContent = '☀️ Light';
+    }
 
   } else {
 
     root.removeAttribute('data-theme');
 
-    this.textContent = '🌙 Dark';
+    if (content) {
+      content.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+      </svg> Dark`;
+    } else {
+      this.textContent = '🌙 Dark';
+    }
 
   }
 
@@ -1767,9 +1789,20 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="chart-toolbar">
 
-        <button onclick="toggleStylePanel('${cardId}')" title="Customize Style">🎨 Style</button>
+        <button onclick="toggleStylePanel('${cardId}')" title="Customize Style">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82-.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg> Style
+        </button>
 
-        <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template">💾 Template</button>
+        <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            <polyline points="7 3 7 8 15 8"></polyline>
+          </svg> Template
+        </button>
 
         <button onclick="downloadChart('${cardId}','png')" title="Download PNG">PNG</button>
 
@@ -3174,6 +3207,8 @@ function setupPCurveDragHandles(cardId, myChart) {
   let startPxY = 0;
   let anchorT = 0;
   let anchorDi = 0;
+  let dragOffsetY = 0;   // pixel offset between cursor and actual curve position at drag start
+  let anchorXPx = 0;
 
   function hitTestSeries(px, py) {
     const THRESHOLD = 10;
@@ -3218,42 +3253,46 @@ function setupPCurveDragHandles(cardId, myChart) {
   }
 
   function getTAtPixelX(pxX) {
-    let dataX;
-    if (isDate) {
-      const dp = myChart.convertFromPixel('grid', [pxX, 0]);
-      if (!dp) return null;
-      const tsVal = dp[0];
-      let bestIdx = 0, bestDiff = Infinity;
-      for (let i = 0; i < w.x.length; i++) {
-        const ts = parseDateStr(w.x[i]);
-        const d = Math.abs(ts - tsVal);
-        if (d < bestDiff) { bestDiff = d; bestIdx = i; }
-      }
-      if (w.forecast && w.forecast.x) {
-        for (let i = 0; i < w.forecast.x.length; i++) {
-          const ts = parseDateStr(w.forecast.x[i]);
-          const d = Math.abs(ts - tsVal);
-          if (d < bestDiff) { bestDiff = d; bestIdx = -1; }
-        }
-        if (bestIdx === -1) {
-          let bfi = 0, bfd = Infinity;
-          for (let i = 0; i < w.forecast.x.length; i++) {
-            const ts = parseDateStr(w.forecast.x[i]);
-            const d = Math.abs(ts - tsVal);
-            if (d < bfd) { bfd = d; bfi = i; }
-          }
-          if (w.forecast.t) return w.forecast.t[bfi];
-        }
-      }
-      return w.t[bestIdx];
-    } else {
-      const dp = myChart.convertFromPixel('grid', [pxX, 0]);
-      if (!dp) return null;
-      dataX = dp[0];
+    const dp = myChart.convertFromPixel('grid', [pxX, 0]);
+    if (!dp) return null;
+
+    if (!isDate) {
+      const dataX = dp[0];
       if (w.t.length === 0) return null;
       const approxT = dataX - w.x[0] + w.t[0];
       return Math.max(0, approxT);
     }
+
+    const tsVal = dp[0];
+    const xtPairs = [];
+    for (let i = 0; i < w.x.length; i++) {
+      if (w.t[i] == null) continue;
+      const ts = parseDateStr(w.x[i]);
+      if (Number.isFinite(ts)) xtPairs.push([ts, w.t[i]]);
+    }
+    if (w.forecast && w.forecast.x && w.forecast.t) {
+      for (let i = 0; i < w.forecast.x.length; i++) {
+        if (w.forecast.t[i] == null) continue;
+        const ts = parseDateStr(w.forecast.x[i]);
+        if (Number.isFinite(ts)) xtPairs.push([ts, w.forecast.t[i]]);
+      }
+    }
+    if (xtPairs.length === 0) return null;
+
+    xtPairs.sort((a, b) => a[0] - b[0]);
+    if (tsVal <= xtPairs[0][0]) return xtPairs[0][1];
+    if (tsVal >= xtPairs[xtPairs.length - 1][0]) return xtPairs[xtPairs.length - 1][1];
+
+    for (let i = 1; i < xtPairs.length; i++) {
+      const prev = xtPairs[i - 1];
+      const next = xtPairs[i];
+      if (tsVal > next[0]) continue;
+      if (next[0] === prev[0]) return next[1];
+      const frac = (tsVal - prev[0]) / (next[0] - prev[0]);
+      return prev[1] + frac * (next[1] - prev[1]);
+    }
+
+    return xtPairs[xtPairs.length - 1][1];
   }
 
   function onMouseDown(e) {
@@ -3262,10 +3301,51 @@ function setupPCurveDragHandles(cardId, myChart) {
     if (hit) {
       dragging = hit;
       startPxY = py;
+      anchorXPx = px;
       const ps = allPs[hit.curveKey];
       anchorDi = hit.which === 'p10' ? ps.p10Di : ps.p90Di;
       const tVal = getTAtPixelX(px);
       anchorT = (tVal != null && tVal > 0) ? tVal : 1;
+
+      // Find the curve's pixel Y at the cursor's X by interpolating between series data points
+      dragOffsetY = 0;
+      const opt = myChart.getOption();
+      if (opt && opt.series) {
+        const seriesId = hit.which + '|' + hit.curveKey;
+        for (let si = 0; si < opt.series.length; si++) {
+          const s = opt.series[si];
+          if (s.id !== seriesId || !s.data) continue;
+          // Convert all data points to pixel and find the segment bracketing cursor X
+          let bestCurvePxY = null;
+          let prevPx = null;
+          let closestDist = Infinity, closestPxY = null;
+          for (let di = 0; di < s.data.length; di++) {
+            if (!Array.isArray(s.data[di]) || s.data[di][1] == null) { prevPx = null; continue; }
+            const curPx = myChart.convertToPixel('grid', [s.data[di][0], s.data[di][1]]);
+            if (!curPx) { prevPx = null; continue; }
+            // Track closest point as fallback
+            const xDist = Math.abs(curPx[0] - px);
+            if (xDist < closestDist) { closestDist = xDist; closestPxY = curPx[1]; }
+            // Check if cursor X is near this point
+            if (xDist < 1) { bestCurvePxY = curPx[1]; break; }
+            // Check if cursor X falls between prevPx and curPx
+            if (prevPx) {
+              const minX = Math.min(prevPx[0], curPx[0]);
+              const maxX = Math.max(prevPx[0], curPx[0]);
+              if (px >= minX && px <= maxX && maxX > minX) {
+                const frac = (px - prevPx[0]) / (curPx[0] - prevPx[0]);
+                bestCurvePxY = prevPx[1] + frac * (curPx[1] - prevPx[1]);
+                break;
+              }
+            }
+            prevPx = curPx;
+          }
+          if (bestCurvePxY == null) bestCurvePxY = closestPxY;
+          if (bestCurvePxY != null) dragOffsetY = py - bestCurvePxY;
+          break;
+        }
+      }
+
       myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
       e.event && e.event.preventDefault && e.event.preventDefault();
     }
@@ -3278,22 +3358,8 @@ function setupPCurveDragHandles(cardId, myChart) {
       return;
     }
     const py = e.offsetY;
-    const anchorXPx = isDate ? (() => {
-      let bestIdx = 0, bestDiff = Infinity;
-      for (let i = 0; i < w.t.length; i++) {
-        const d = Math.abs(w.t[i] - anchorT);
-        if (d < bestDiff) { bestDiff = d; bestIdx = i; }
-      }
-      const ts = parseDateStr(w.x[bestIdx]);
-      const cp = myChart.convertToPixel('grid', [ts, 0]);
-      return cp ? cp[0] : e.offsetX;
-    })() : (() => {
-      const xVal = w.x[0] + anchorT - w.t[0];
-      const cp = myChart.convertToPixel('grid', [xVal, 0]);
-      return cp ? cp[0] : e.offsetX;
-    })();
-
-    const dp = myChart.convertFromPixel('grid', [anchorXPx, py]);
+    const adjustedPy = py - dragOffsetY;
+    const dp = myChart.convertFromPixel('grid', [anchorXPx || e.offsetX, adjustedPy]);
     const newDataY = dp ? dp[1] : 0;
     if (newDataY <= 0) return;
 
@@ -4971,19 +5037,38 @@ function renderSingleChart(cardId, data, forecastMonths) {
     },
 
     tooltip: {
-      trigger: 'item', axisPointer: { type: 'cross', lineStyle: { color: 'var(--text-dim, #999)', type: 'dashed' } }, formatter: function (p) {
-        if (!p || p.seriesName.endsWith('_bridge') || p.seriesName.startsWith('_')) return '';
-        let val = Array.isArray(p.data) ? p.data[1] : p.data;
-        if (val == null) return '';
-        let header = isDate ? '<b>' + formatDateTs(Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>' : '<b>' + (Array.isArray(p.data) ? p.data[0] : p.axisValue) + '</b>';
-        header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
+      trigger: 'axis', axisPointer: { type: 'cross', lineStyle: { color: 'var(--text-dim, #999)', type: 'dashed' } }, formatter: function (params) {
+        if (!Array.isArray(params)) params = params ? [params] : [];
+        if (params.length === 0) return '';
+        
+        let header = '';
+        const firstParam = params[0];
+        const xVal = Array.isArray(firstParam.data) ? firstParam.data[0] : firstParam.axisValue;
+        header = isDate ? '<b>' + formatDateTs(xVal) + '</b>' : '<b>' + xVal + '</b>';
+        
+        params.forEach(p => {
+          if (p && !p.seriesName.endsWith('_bridge') && !p.seriesName.startsWith('_')) {
+            let val = Array.isArray(p.data) ? p.data[1] : p.data;
+            if (val != null) {
+              header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
+            }
+          }
+        });
+        
         return header;
       }
     },
 
-    legend: { data: legendData, top: 4, left: 60, textStyle: { color: lbC, fontSize: 11 } },
+    legend: {
+      data: legendData,
+      top: 30, // Move legend down to avoid overlap with title
+      left: 60,
+      right: 30, // Add right bound for wrap
+      type: 'scroll', // Allow scrolling if too many items
+      textStyle: { color: lbC, fontSize: 11 }
+    },
 
-    grid: { left: gridLeft, right: gridRight, top: gridTop, bottom: gridBottom },
+    grid: { left: gridLeft, right: gridRight, top: gridTop + 30, bottom: gridBottom }, // Increase top grid margin to fit legend below title
 
     xAxis: {
 
@@ -6054,16 +6139,11 @@ async function _performMultiFit(cardId, indices, modelOverride) {
     }
     const fit = await res.json();
 
-    // Build fitted data series: evaluate fitted curve over the range of selected t values
-    const tMin = Math.min(...tFit), tMax = Math.max(...tFit);
+    // Build fitted data series: evaluate fitted curve only at actual data point dates
     const fittedData = [];
-    // Generate smooth curve points across the selected range
-    const nPts = Math.max(100, indices.length * 2);
-    const step = (tMax - tMin) / (nPts - 1);
-    for (let i = 0; i < nPts; i++) {
-      const tVal = tMin + step * i;
+    for (let i = 0; i < tFit.length; i++) {
+      const tVal = tFit[i];
       const yVal = evalDeclineModel(model, tVal, fit.params);
-      // Convert t back to x display value
       if (isDate) {
         const MS_PER_DAY = 86400000;
         const firstDateMs = parseDateStr(w.x[0]);
