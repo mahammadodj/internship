@@ -163,9 +163,16 @@ const cardCtrlSelected = {};      // cardId -> Set<index> for Ctrl+click multi-s
 const cardMultiFits = {};         // cardId -> Array<{id, model, params, equation, indices:[], color, fittedData:[[x,y],...], forecastData:[[x,y],...]}>  
 const cardHiddenSeries = {};      // cardId -> Set<seriesName> of manually removed series
 const cardActiveCurveStyle = {};  // cardId -> 'well:wellName' or 'mf:id' identifying the visible style section
+const cardOriginalParams = {};    // cardId -> { main: {params}, mf_<id>: {params} } — snapshot of fitted params before user drags
 let _multiFitNextId = 1;
 const MULTI_FIT_COLORS = ['#e040fb', '#00bcd4', '#ff9800', '#8bc34a', '#ff5722', '#9c27b0', '#009688', '#ffc107', '#795548', '#607d8b'];
 let _multiPointMenuJustOpened = false;
+
+/* Save a snapshot of curve params so the user can reset after dragging */
+function _saveOriginalParams(cardId, curveKey, params) {
+  if (!cardOriginalParams[cardId]) cardOriginalParams[cardId] = {};
+  cardOriginalParams[cardId][curveKey] = JSON.parse(JSON.stringify(params));
+}
 
 
 
@@ -2002,7 +2009,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 
 function getDefaultStyles() {
-  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'circle', actualSize: 10, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
+  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'triangle', actualSize: 14, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
 }
 
 /* Build per-curve style HTML sections inside the style panel.
@@ -2705,6 +2712,11 @@ async function runSingleDCA(cardId) {
     if (!res.ok) throw new Error(data.detail || 'Error');
 
     cardLastData[cardId] = data;
+
+    /* Snapshot main curve original params for reset capability */
+    if (data.wells) {
+      data.wells.forEach(function (w) { if (w.params) _saveOriginalParams(cardId, 'main', w.params); });
+    }
 
     rebuildCurveStyleSections(cardId);
     cardStyles[cardId] = readCardStyles(cardId);
@@ -6290,6 +6302,7 @@ async function _performMultiFit(cardId, indices, modelOverride) {
       forecast_t: fit.forecast_t || [],
     };
     cardMultiFits[cardId].push(curveFit);
+    _saveOriginalParams(cardId, 'mf_' + curveFit.id, curveFit.params);
 
     // Rebuild style sections to include the new multi-fit curve
     rebuildCurveStyleSections(cardId);
@@ -6375,6 +6388,7 @@ async function changeMultiFitModel(cardId, mfId, newModel) {
     mf.equation = fit.equation || '';
     mf.fittedData = fittedData;
     mf.forecast_t = fit.forecast_t || [];
+    _saveOriginalParams(cardId, 'mf_' + mf.id, mf.params);
 
     rebuildCurveStyleSections(cardId);
     saveZoomState(cardId);
@@ -6409,6 +6423,92 @@ function changeCurveModel(cardId, type, id, newModel) {
   }
 }
 
+/* Reset a curve's params back to the original fitted values (undo drag shifts) */
+function resetCurveToOriginal(cardId, type, id) {
+  const orig = cardOriginalParams[cardId];
+  if (!orig) { showToast('No original parameters saved', 'warning'); return; }
+
+  const data = cardLastData[cardId];
+  if (!data) return;
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+
+  if (type === 'main') {
+    const saved = orig['main'];
+    if (!saved) { showToast('No original parameters for main curve', 'warning'); return; }
+    const w = data.wells && data.wells[0];
+    if (!w || !w.params) return;
+
+    w.params = JSON.parse(JSON.stringify(saved));
+    const model = data.model || 'exponential';
+
+    /* Recalculate fitted values */
+    if (w.y_fitted) {
+      const excl = cardExclusions[cardId] || new Set();
+      const nonExcl = [];
+      for (let i = 0; i < w.t.length; i++) { if (!excl.has(i)) nonExcl.push(i); }
+      const firstIncluded = nonExcl.length > 0 ? nonExcl[0] : 0;
+      for (let i = 0; i < w.t.length; i++) {
+        w.y_fitted[i] = (i < firstIncluded || excl.has(i)) ? null : evalDeclineModel(model, w.t[i], w.params);
+      }
+    }
+    /* Recalculate forecast */
+    if (w.forecast && w.forecast.t && w.forecast.y) {
+      for (let i = 0; i < w.forecast.t.length; i++) {
+        w.forecast.y[i] = evalDeclineModel(model, w.forecast.t[i], w.params);
+      }
+    }
+  } else if (type === 'multi') {
+    const mfKey = 'mf_' + id;
+    const saved = orig[mfKey];
+    if (!saved) { showToast('No original parameters for this curve', 'warning'); return; }
+    const fits = cardMultiFits[cardId] || [];
+    const mf = fits.find(function (f) { return f.id === parseInt(id); });
+    if (!mf) return;
+
+    mf.params = JSON.parse(JSON.stringify(saved));
+    const w = data.wells && data.wells[0];
+    if (!w) return;
+    const isDate = w.is_date || false;
+
+    /* Recalculate fitted data */
+    if (mf.indices && w.t) {
+      mf.fittedData = [];
+      for (const i of mf.indices) {
+        if (i < w.t.length && w.y_actual[i] != null) {
+          const yVal = evalDeclineModel(mf.model, w.t[i], mf.params);
+          mf.fittedData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], yVal]);
+        }
+      }
+    }
+    /* Recalculate forecast data */
+    if (mf.forecast_t && mf.forecast_t.length > 0) {
+      mf.forecastData = [];
+      for (let i = 0; i < mf.forecast_t.length; i++) {
+        const yVal = evalDeclineModel(mf.model, mf.forecast_t[i], mf.params);
+        if (isDate) {
+          const MS_PER_DAY = 86400000;
+          const firstDateMs = parseDateStr(w.x[0]);
+          const tOffset = w.t[0] || 0;
+          mf.forecastData.push([firstDateMs + (mf.forecast_t[i] - tOffset) * MS_PER_DAY, yVal]);
+        } else {
+          const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+          mf.forecastData.push([mf.forecast_t[i] - t0 + x0, yVal]);
+        }
+      }
+      if (mf.fittedData && mf.fittedData.length > 0) {
+        mf.forecastData.unshift(mf.fittedData[mf.fittedData.length - 1]);
+      }
+    }
+  }
+
+  saveZoomState(cardId);
+  renderSingleChart(cardId, data, forecastMonths);
+  updateMultiFitPanel(cardId);
+  showToast('Curve reset to original fit', 'success', 2000);
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
 function removeCurve(cardId, type, id) {
   if (type === 'multi') {
     const fits = cardMultiFits[cardId];
@@ -6420,6 +6520,7 @@ function removeCurve(cardId, type, id) {
     if (cardPCurveState[cardId]) {
       delete cardPCurveState[cardId]['mf_' + id];
     }
+    if (cardOriginalParams[cardId]) delete cardOriginalParams[cardId]['mf_' + id];
   } else if (type === 'main') {
     const data = cardLastData[cardId];
     if (data && data.wells) {
@@ -6431,6 +6532,7 @@ function removeCurve(cardId, type, id) {
       });
     }
     if (cardPCurveState[cardId]) delete cardPCurveState[cardId]['main'];
+    if (cardOriginalParams[cardId]) delete cardOriginalParams[cardId]['main'];
   }
 
   rebuildCurveStyleSections(cardId);
@@ -6566,6 +6668,13 @@ function updateMultiFitPanel(cardId) {
       const isPEnabled = pcs[cKey] && pcs[cKey].enabled;
       const pColor = isPEnabled ? 'color: var(--accent); border-color: var(--accent); font-weight: 500;' : '';
       actionsHtml += '<button class="mf-pcurve" style="' + pColor + '" onclick="toggleCurvePCurves(\'' + cardId + '\', \'' + c.type + '\', \'' + c.id + '\')" title="Toggle P10/P90">± P10/P90</button>';
+
+      /* Reset button — only shown if original params exist and differ from current */
+      const origKey = c.type === 'main' ? 'main' : 'mf_' + c.id;
+      const origP = cardOriginalParams[cardId] && cardOriginalParams[cardId][origKey];
+      if (origP && JSON.stringify(origP) !== JSON.stringify(c.params)) {
+        actionsHtml += '<button class="mf-reset" onclick="resetCurveToOriginal(\'' + cardId + '\', \'' + c.type + '\', \'' + c.id + '\')" title="Reset to original fitted parameters">↺ Reset</button>';
+      }
 
       actionsHtml += '<button class="mf-remove" onclick="removeCurve(\'' + cardId + '\', \'' + c.type + '\', \'' + c.id + '\')" title="Delete this curve permanently">&times;</button>';
       actionsHtml += '<button class="mf-hide" onclick="hideCurveFromPanel(\'' + cardId + '\', ' + JSON.stringify(c.subSeries).replace(/'/g, "\\'").replace(/"/g, '&quot;') + ')" title="Hide this curve from plot">Hide</button>';
@@ -7358,8 +7467,32 @@ function showPointMenu(cardId, idx, clientX, clientY) {
   setTimeout(() => { _pointMenuJustOpened = false; }, 50);
 
   const excl = cardExclusions[cardId] || new Set();
-  const label = document.getElementById('pointMenuExclLabel');
-  if (label) label.textContent = excl.has(idx) ? 'Include in fitting' : 'Exclude from fitting';
+
+  /* Build per-curve toggle items dynamically */
+  const container = document.getElementById('pointMenuCurveActions');
+  if (container) {
+    const curves = _getAvailableCurves(cardId);
+    let html = '';
+    curves.forEach(function (c, ci) {
+      if (ci > 0) html += '<div class="ccm-divider"></div>';
+      let isExcluded = false;
+      if (c.type === 'main') {
+        isExcluded = excl.has(idx);
+      } else {
+        const fits = cardMultiFits[cardId] || [];
+        const mf = fits.find(function (f) { return f.id === c.id; });
+        isExcluded = mf ? !mf.indices.includes(idx) : true;
+      }
+      const actionLabel = isExcluded ? 'Include in fitting' : 'Exclude from fitting';
+      const icon = isExcluded ? '✓' : '⊘';
+      const style = isExcluded ? 'color:var(--green,#4caf50);' : '';
+      html += '<div style="padding:4px 14px 2px;font-size:0.72rem;opacity:0.5;display:flex;align-items:center;gap:5px;">'
+        + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c.color + ';"></span>'
+        + c.label + '</div>';
+      html += '<div class="ccm-item" style="' + style + '" onclick="pointMenuToggleExcludeForCurve(\'' + c.type + '\',' + c.id + ')"><span class="ccm-icon">' + icon + '</span> ' + actionLabel + '</div>';
+    });
+    container.innerHTML = html;
+  }
 
   const menu = document.getElementById('pointMenu');
   menu.style.left = clientX + 'px';
@@ -7383,19 +7516,28 @@ document.addEventListener('click', function (e) {
   if (!e.target.closest('#pointMenu')) hidePointMenu();
 });
 
-function pointMenuToggleExclude() {
+function pointMenuToggleExcludeForCurve(curveType, curveId) {
   const cardId = _pointMenuCardId, idx = _pointMenuIdx;
   hidePointMenu();
   if (cardId == null || idx == null) return;
-  saveZoomState(cardId);
-  toggleExclusion(cardId, idx);
-}
 
-/* Wire up point menu button */
-(function () {
-  const btn = document.getElementById('pointMenuExclBtn');
-  if (btn) btn.addEventListener('click', pointMenuToggleExclude);
-})();
+  if (curveType === 'multi') {
+    const fits = cardMultiFits[cardId] || [];
+    const mf = fits.find(function (f) { return f.id === curveId; });
+    if (!mf) return;
+
+    if (mf.indices.includes(idx)) {
+      mf.indices = mf.indices.filter(function (i) { return i !== idx; });
+    } else {
+      mf.indices.push(idx);
+      mf.indices.sort(function (a, b) { return a - b; });
+    }
+    refitMultiFitCurveIndices(cardId, curveId);
+  } else {
+    saveZoomState(cardId);
+    toggleExclusion(cardId, idx);
+  }
+}
 
 /* ====================================================================
    Ctrl+click multi-point selection
@@ -7535,6 +7677,137 @@ function clearCtrlSelectionHighlights(cardId) {
   });
 }
 
+/* Build a list of all curves available for a card (main + multi-fit) */
+function _getAvailableCurves(cardId) {
+  const curves = [];
+  const data = cardLastData[cardId];
+  const allWells = data && data.wells ? data.wells : [];
+  const st = cardStyles[cardId] || getDefaultStyles();
+  const palette = getPlotThemePalette(st.plotTheme || 'classic');
+  const isSingle = allWells.length <= 1;
+  const mainModel = data?.model || 'exponential';
+
+  allWells.forEach(function (w, wIdx) {
+    if (w.y_fitted || w.params) {
+      const cs = (st.curveStyles && st.curveStyles[w.well]) || {};
+      const defColor = !isSingle ? palette[wIdx % palette.length] : (cs.fittedColor || st.fittedColor);
+      const fitColor = cs.fittedColor || defColor;
+      const wellName = w.well || 'Fitted';
+      curves.push({
+        type: 'main', id: 0,
+        label: (isSingle ? wellName : wellName) + ' (' + mainModel + ')',
+        color: fitColor
+      });
+    }
+  });
+
+  const fits = cardMultiFits[cardId] || [];
+  fits.forEach(function (mf) {
+    const ms = ((st.multiFitStyles || {})['mf_' + mf.id]) || {};
+    curves.push({
+      type: 'multi', id: mf.id,
+      label: 'Curve #' + mf.id + ' (' + mf.model + ')',
+      color: ms.color || mf.color
+    });
+  });
+
+  return curves;
+}
+
+/* Refit a multi-fit curve after its indices have been modified */
+async function refitMultiFitCurveIndices(cardId, mfId) {
+  const fits = cardMultiFits[cardId];
+  if (!fits) return;
+  const mf = fits.find(function (f) { return f.id === mfId; });
+  if (!mf) return;
+  const indices = mf.indices;
+  if (!indices || indices.length < 3) {
+    showToast('Need at least 3 data points to re-fit', 'warning');
+    return;
+  }
+
+  const lastData = cardLastData[cardId];
+  const w = lastData?.wells?.[0];
+  if (!w) return;
+  const isDate = w.is_date || false;
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+
+  const tFit = [], yFit = [];
+  for (const i of indices) {
+    if (i < w.t.length && w.y_actual[i] != null) {
+      tFit.push(w.t[i]);
+      yFit.push(w.y_actual[i]);
+    }
+  }
+  if (tFit.length < 3) { showToast('Not enough valid data points', 'warning'); return; }
+
+  try {
+    const res = await fetch('/api/fit_inline', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t: tFit, y: yFit, model: mf.model, forecast_months: forecastMonths }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(function () { return {}; });
+      showToast(err.detail || 'Re-fit failed', 'error');
+      return;
+    }
+    const fit = await res.json();
+
+    /* Rebuild fitted data */
+    const fittedData = [];
+    for (let i = 0; i < tFit.length; i++) {
+      const tVal = tFit[i];
+      const yVal = evalDeclineModel(mf.model, tVal, fit.params);
+      if (isDate) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = parseDateStr(w.x[0]);
+        const tOffset = w.t[0] || 0;
+        fittedData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+      } else {
+        const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+        fittedData.push([tVal - t0 + x0, yVal]);
+      }
+    }
+
+    /* Rebuild forecast */
+    let forecastData = [];
+    if (fit.forecast_t && fit.forecast_y && fit.forecast_t.length > 0) {
+      for (let i = 0; i < fit.forecast_t.length; i++) {
+        if (isDate) {
+          const MS_PER_DAY = 86400000;
+          const firstDateMs = parseDateStr(w.x[0]);
+          const tOffset = w.t[0] || 0;
+          forecastData.push([firstDateMs + (fit.forecast_t[i] - tOffset) * MS_PER_DAY, fit.forecast_y[i]]);
+        } else {
+          const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+          forecastData.push([fit.forecast_t[i] - t0 + x0, fit.forecast_y[i]]);
+        }
+      }
+      if (fittedData.length > 0) forecastData.unshift(fittedData[fittedData.length - 1]);
+    }
+
+    mf.params = fit.params;
+    mf.equation = fit.equation || '';
+    mf.fittedData = fittedData;
+    mf.forecastData = forecastData;
+    mf.forecast_t = fit.forecast_t || [];
+    _saveOriginalParams(cardId, 'mf_' + mf.id, mf.params);
+
+    rebuildCurveStyleSections(cardId);
+    saveZoomState(cardId);
+    renderSingleChart(cardId, lastData, forecastMonths);
+    updateMultiFitPanel(cardId);
+
+    const fmt = function (v) { return typeof v === 'number' ? v.toFixed(4) : v; };
+    showToast('Curve #' + mf.id + ' re-fit (' + mf.model + ', qi=' + fmt(fit.params.qi) + ')', 'success', 3000);
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+  } catch (e) {
+    showToast('Re-fit failed: ' + e.message, 'error');
+  }
+}
+
 function showMultiPointMenu(clientX, clientY, cardId) {
   _multiPointMenuJustOpened = true;
   setTimeout(function () { _multiPointMenuJustOpened = false; }, 50);
@@ -7542,6 +7815,23 @@ function showMultiPointMenu(clientX, clientY, cardId) {
   const count = (cardCtrlSelected[cardId] || new Set()).size;
   const header = document.getElementById('multiPointMenuCount');
   if (header) header.textContent = count + ' point' + (count !== 1 ? 's' : '') + ' selected';
+
+  /* Build per-curve include/exclude/fitonly items dynamically */
+  const container = document.getElementById('multiPointMenuCurveActions');
+  if (container) {
+    const curves = _getAvailableCurves(cardId);
+    let html = '';
+    curves.forEach(function (c, ci) {
+      if (ci > 0) html += '<div class="ccm-divider"></div>';
+      html += '<div style="padding:4px 14px 2px;font-size:0.72rem;opacity:0.5;display:flex;align-items:center;gap:5px;">'
+        + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c.color + ';"></span>'
+        + c.label + '</div>';
+      html += '<div class="ccm-item" style="color:var(--green,#4caf50);" onclick="multiPointMenuApply(\'include\',\'' + c.type + '\',' + c.id + ')"><span class="ccm-icon">✓</span> Include in fitting</div>';
+      html += '<div class="ccm-item" onclick="multiPointMenuApply(\'exclude\',\'' + c.type + '\',' + c.id + ')"><span class="ccm-icon">⊘</span> Exclude from fitting</div>';
+      html += '<div class="ccm-item" style="color:var(--accent,#3b82f6);" onclick="multiPointMenuApply(\'fitonly\',\'' + c.type + '\',' + c.id + ')"><span class="ccm-icon">◎</span> Fit only selected</div>';
+    });
+    container.innerHTML = html;
+  }
 
   const menu = document.getElementById('multiPointMenu');
   menu.dataset.cardId = cardId;
@@ -7566,7 +7856,7 @@ document.addEventListener('click', function (e) {
   if (!e.target.closest('#multiPointMenu')) hideMultiPointMenu();
 });
 
-function multiPointMenuApply(action) {
+function multiPointMenuApply(action, curveType, curveId) {
   const menu = document.getElementById('multiPointMenu');
   const cardId = menu && menu.dataset.cardId;
   hideMultiPointMenu();
@@ -7575,58 +7865,64 @@ function multiPointMenuApply(action) {
   const selected = cardCtrlSelected[cardId] || new Set();
   if (selected.size === 0) return;
 
-  if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
-  const excl = cardExclusions[cardId];
   const w0 = cardLastData[cardId] && cardLastData[cardId].wells && cardLastData[cardId].wells[0];
   const anchorIndices = (w0 && w0.qi_anchor_indices) ? w0.qi_anchor_indices : [];
 
-  if (action === 'exclude') {
-    // Add selected points to exclusion set
-    selected.forEach(function (idx) {
-      if (anchorIndices.includes(idx)) return;
-      excl.add(idx);
-    });
-  } else if (action === 'include') {
-    // Remove selected points from exclusion set (add them back to fitting)
-    selected.forEach(function (idx) {
-      excl.delete(idx);
-    });
-  } else if (action === 'fitonly') {
-    // Fit ONLY these selected points — exclude everything else
-    const totalLen = w0 ? w0.x.length : 0;
-    excl.clear();
-    for (let i = 0; i < totalLen; i++) {
-      if (!selected.has(i) && !anchorIndices.includes(i)) {
-        excl.add(i);
-      }
-    }
-  } else if (action === 'addfit') {
-    // Add a new curve fit to the selected points only
+  if (action === 'addfit') {
     addCurveFitFromMultiSelect(cardId, selected);
     clearCtrlSelectionHighlights(cardId);
-    return; // addCurveFitFromMultiSelect handles everything
+    return;
   }
 
-  clearCtrlSelectionHighlights(cardId);
-  saveZoomState(cardId);
-  if (w0 && w0.qi_anchor_indices && w0.qi_anchor_indices.length > 0) {
-    refitCurrentData(cardId);
+  if (curveType === 'multi') {
+    /* Apply to a specific multi-fit curve */
+    const fits = cardMultiFits[cardId] || [];
+    const mf = fits.find(function (f) { return f.id === curveId; });
+    if (!mf) return;
+
+    if (action === 'include') {
+      selected.forEach(function (idx) { if (!mf.indices.includes(idx)) mf.indices.push(idx); });
+      mf.indices.sort(function (a, b) { return a - b; });
+    } else if (action === 'exclude') {
+      mf.indices = mf.indices.filter(function (i) { return !selected.has(i); });
+    } else if (action === 'fitonly') {
+      mf.indices = [...selected].sort(function (a, b) { return a - b; });
+    }
+
+    clearCtrlSelectionHighlights(cardId);
+    refitMultiFitCurveIndices(cardId, curveId);
   } else {
-    runSingleDCA(cardId);
+    /* Apply to main curve */
+    if (!cardExclusions[cardId]) cardExclusions[cardId] = new Set();
+    const excl = cardExclusions[cardId];
+
+    if (action === 'exclude') {
+      selected.forEach(function (idx) {
+        if (anchorIndices.includes(idx)) return;
+        excl.add(idx);
+      });
+    } else if (action === 'include') {
+      selected.forEach(function (idx) { excl.delete(idx); });
+    } else if (action === 'fitonly') {
+      const totalLen = w0 ? w0.x.length : 0;
+      excl.clear();
+      for (let i = 0; i < totalLen; i++) {
+        if (!selected.has(i) && !anchorIndices.includes(i)) excl.add(i);
+      }
+    }
+
+    clearCtrlSelectionHighlights(cardId);
+    saveZoomState(cardId);
+    if (w0 && w0.qi_anchor_indices && w0.qi_anchor_indices.length > 0) {
+      refitCurrentData(cardId);
+    } else {
+      runSingleDCA(cardId);
+    }
   }
 }
 
 /* Wire up multi-point menu buttons */
 (function () {
-  const exclBtn = document.getElementById('multiPointMenuExclBtn');
-  if (exclBtn) exclBtn.addEventListener('click', function () { multiPointMenuApply('exclude'); });
-
-  const inclBtn = document.getElementById('multiPointMenuInclBtn');
-  if (inclBtn) inclBtn.addEventListener('click', function () { multiPointMenuApply('include'); });
-
-  const fitOnlyBtn = document.getElementById('multiPointMenuFitOnlyBtn');
-  if (fitOnlyBtn) fitOnlyBtn.addEventListener('click', function () { multiPointMenuApply('fitonly'); });
-
   const addFitBtn = document.getElementById('multiPointMenuAddFitBtn');
   if (addFitBtn) addFitBtn.addEventListener('click', function () { multiPointMenuApply('addfit'); });
 
@@ -7842,6 +8138,7 @@ async function refitCurrentData(cardId) {
 
     w.params = fit.params;
     w.equation = fit.equation || '';
+    _saveOriginalParams(cardId, 'main', w.params);
 
     const func = (t) => evalDeclineModel(model, t, w.params);
     const nonExcl = [];

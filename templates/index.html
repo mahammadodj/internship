@@ -438,16 +438,14 @@
 
   <!-- Regular Data Point Popup Menu -->
   <div class="custom-context-menu" id="pointMenu" style="display:none;min-width:190px;">
-    <div class="ccm-item" id="pointMenuExclBtn"><span class="ccm-icon">⊘</span> <span id="pointMenuExclLabel">Exclude from fitting</span></div>
+    <div id="pointMenuCurveActions"></div>
   </div>
 
   <!-- Multi-point Selection Popup Menu (Ctrl+click) -->
   <div class="custom-context-menu" id="multiPointMenu" style="display:none;min-width:210px;">
     <div id="multiPointMenuCount" style="padding:5px 14px 6px;font-size:0.78rem;opacity:0.6;border-bottom:1px solid var(--border);margin-bottom:3px;">0 points selected</div>
-    <div class="ccm-item" id="multiPointMenuInclBtn" style="color:var(--green,#4caf50);"><span class="ccm-icon">✓</span> Include in fitting</div>
-    <div class="ccm-item" id="multiPointMenuExclBtn"><span class="ccm-icon">⊘</span> Exclude from fitting</div>
+    <div id="multiPointMenuCurveActions"></div>
     <div class="ccm-divider"></div>
-    <div class="ccm-item" id="multiPointMenuFitOnlyBtn" style="color:var(--accent,#3b82f6);"><span class="ccm-icon">◎</span> Fit only selected</div>
     <div class="ccm-item" id="multiPointMenuAddFitBtn" style="color:var(--accent,#e040fb);"><span class="ccm-icon">➕</span> Add curve fit</div>
     <div class="ccm-divider"></div>
     <div class="ccm-item" id="multiPointMenuClearBtn" style="opacity:0.65;"><span class="ccm-icon">✕</span> Clear selection</div>
