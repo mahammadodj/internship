@@ -56,39 +56,17 @@ document.getElementById('themeToggle').addEventListener('click', function () {
 
   const isDark = !root.hasAttribute('data-theme');
 
-  const content = this.querySelector('.theme-btn-content');
-
   if (isDark) {
 
     root.setAttribute('data-theme', 'light');
 
-    if (content) {
-      content.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
-        <circle cx="12" cy="12" r="5"></circle>
-        <line x1="12" y1="1" x2="12" y2="3"></line>
-        <line x1="12" y1="21" x2="12" y2="23"></line>
-        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-        <line x1="1" y1="12" x2="3" y2="12"></line>
-        <line x1="21" y1="12" x2="23" y2="12"></line>
-        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-      </svg> Light`;
-    } else {
-      this.textContent = '☀️ Light';
-    }
+    this.textContent = '☀️ Light';
 
   } else {
 
     root.removeAttribute('data-theme');
 
-    if (content) {
-      content.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-      </svg> Dark`;
-    } else {
-      this.textContent = '🌙 Dark';
-    }
+    this.textContent = '🌙 Dark';
 
   }
 
@@ -1789,20 +1767,9 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="chart-toolbar">
 
-        <button onclick="toggleStylePanel('${cardId}')" title="Customize Style">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82-.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-          </svg> Style
-        </button>
+        <button onclick="toggleStylePanel('${cardId}')" title="Customize Style">🎨 Style</button>
 
-        <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-            <polyline points="17 21 17 13 7 13 7 21"></polyline>
-            <polyline points="7 3 7 8 15 8"></polyline>
-          </svg> Template
-        </button>
+        <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template">💾 Template</button>
 
         <button onclick="downloadChart('${cardId}','png')" title="Download PNG">PNG</button>
 
@@ -3192,53 +3159,77 @@ function toggleCurvePCurves(cardId, cType, cId) {
 }
 
 function setupPCurveDragHandles(cardId, myChart) {
-  const allPs = cardPCurveState[cardId] || {};
-  const anyEnabled = Object.values(allPs).some(ps => ps && ps.enabled);
-  if (!anyEnabled) return;
-
   const data = cardLastData[cardId];
   if (!data || !data.wells || data.wells.length === 0) return;
   const w = data.wells[0];
-  if (!w.y_fitted || !w.params || !w.t) return;
+  if (!w.params || !w.t) return;
 
   const isDate = w.is_date || false;
   const zr = myChart.getZr();
-  let dragging = null;   // { which: 'p10'|'p90', curveKey: 'main'|'mf_X' }
-  let startPxY = 0;
+  let dragging = null;
   let anchorT = 0;
-  let anchorDi = 0;
-  let dragOffsetY = 0;   // pixel offset between cursor and actual curve position at drag start
+  let dragOffsetY = 0;
   let anchorXPx = 0;
 
   function hitTestSeries(px, py) {
     const THRESHOLD = 10;
     const opt = myChart.getOption();
-    if (!opt || !opt.series) return null;
+    if (!opt || !opt.series) { console.log('[HitTest] No option/series'); return null; }
+
+    const isSingle = data.wells.length === 1;
+    const prefix = isSingle ? '' : (w.well || '') + ' ';
+    const fittedName = prefix + 'Fitted';
+
     for (let si = 0; si < opt.series.length; si++) {
       const s = opt.series[si];
-      if (!s.id) continue;
-      const parts = s.id.split('|');
-      if (parts.length < 2 || (parts[0] !== 'p10' && parts[0] !== 'p90')) continue;
-      const which = parts[0];
-      const curveKey = parts[1];
-
+      if (s.type !== 'line') continue;
       const sData = s.data;
       if (!sData || sData.length === 0) continue;
+
+      let hitType = null, which = null, curveKey = null, mfId = null;
+
+      if (s.id) {
+        const parts = s.id.split('|');
+        if (parts.length >= 2 && (parts[0] === 'p10' || parts[0] === 'p90')) {
+          hitType = 'pcurve';
+          which = parts[0];
+          curveKey = parts[1];
+        }
+      }
+      if (!hitType && s.name === fittedName) {
+        hitType = 'fitted';
+        curveKey = 'main';
+      }
+      if (!hitType && s.name && s.name.startsWith('Curve #')) {
+        const m = s.name.match(/^Curve #(\d+)\s/);
+        if (m) {
+          hitType = 'multifit';
+          mfId = parseInt(m[1]);
+          curveKey = 'mf_' + mfId;
+        }
+      }
+      if (!hitType) continue;
+
+      console.log('[HitTest] Checking series:', s.name, 'type:', hitType, 'dataLen:', sData.length);
+      let closestPixDist = Infinity;
       let prevPt = null;
       for (let di = 0; di < sData.length; di++) {
         if (!Array.isArray(sData[di]) || sData[di][1] == null) { prevPt = null; continue; }
-        const val = sData[di][1]; const xIdx = sData[di][0];
-        const ptPx = myChart.convertToPixel('grid', [xIdx, val]);
-        if (!ptPx) { prevPt = null; continue; }
-        if (Math.abs(ptPx[0] - px) < THRESHOLD * 3 && Math.abs(ptPx[1] - py) < THRESHOLD) {
-          return { which, curveKey, dataIdx: di };
+        const ptPx = myChart.convertToPixel('grid', [sData[di][0], sData[di][1]]);
+        if (!ptPx) { console.log('[HitTest]  convertToPixel returned null for di=', di, 'data=', sData[di]); prevPt = null; continue; }
+        const dxPt = Math.abs(ptPx[0] - px), dyPt = Math.abs(ptPx[1] - py);
+        const ptDist = Math.hypot(dxPt, dyPt);
+        if (ptDist < closestPixDist) closestPixDist = ptDist;
+        if (dxPt < THRESHOLD * 3 && dyPt < THRESHOLD) {
+          return { type: hitType, which, curveKey, mfId, seriesIdx: si, dataIdx: di };
         }
         if (prevPt) {
           const dist = pointToSegmentDist(px, py, prevPt[0], prevPt[1], ptPx[0], ptPx[1]);
-          if (dist < THRESHOLD) return { which, curveKey, dataIdx: di };
+          if (dist < THRESHOLD) return { type: hitType, which, curveKey, mfId, seriesIdx: si, dataIdx: di };
         }
         prevPt = ptPx;
       }
+      console.log('[HitTest]  closestPixDist for', s.name, '=', closestPixDist.toFixed(1));
     }
     return null;
   }
@@ -3295,56 +3286,47 @@ function setupPCurveDragHandles(cardId, myChart) {
     return xtPairs[xtPairs.length - 1][1];
   }
 
-  function onMouseDown(e) {
-    const px = e.offsetX, py = e.offsetY;
-    const hit = hitTestSeries(px, py);
-    if (hit) {
-      dragging = hit;
-      startPxY = py;
-      anchorXPx = px;
-      const ps = allPs[hit.curveKey];
-      anchorDi = hit.which === 'p10' ? ps.p10Di : ps.p90Di;
-      const tVal = getTAtPixelX(px);
-      anchorT = (tVal != null && tVal > 0) ? tVal : 1;
-
-      // Find the curve's pixel Y at the cursor's X by interpolating between series data points
-      dragOffsetY = 0;
-      const opt = myChart.getOption();
-      if (opt && opt.series) {
-        const seriesId = hit.which + '|' + hit.curveKey;
-        for (let si = 0; si < opt.series.length; si++) {
-          const s = opt.series[si];
-          if (s.id !== seriesId || !s.data) continue;
-          // Convert all data points to pixel and find the segment bracketing cursor X
-          let bestCurvePxY = null;
-          let prevPx = null;
-          let closestDist = Infinity, closestPxY = null;
-          for (let di = 0; di < s.data.length; di++) {
-            if (!Array.isArray(s.data[di]) || s.data[di][1] == null) { prevPx = null; continue; }
-            const curPx = myChart.convertToPixel('grid', [s.data[di][0], s.data[di][1]]);
-            if (!curPx) { prevPx = null; continue; }
-            // Track closest point as fallback
-            const xDist = Math.abs(curPx[0] - px);
-            if (xDist < closestDist) { closestDist = xDist; closestPxY = curPx[1]; }
-            // Check if cursor X is near this point
-            if (xDist < 1) { bestCurvePxY = curPx[1]; break; }
-            // Check if cursor X falls between prevPx and curPx
-            if (prevPx) {
-              const minX = Math.min(prevPx[0], curPx[0]);
-              const maxX = Math.max(prevPx[0], curPx[0]);
-              if (px >= minX && px <= maxX && maxX > minX) {
-                const frac = (px - prevPx[0]) / (curPx[0] - prevPx[0]);
-                bestCurvePxY = prevPx[1] + frac * (curPx[1] - prevPx[1]);
-                break;
-              }
-            }
-            prevPx = curPx;
-          }
-          if (bestCurvePxY == null) bestCurvePxY = closestPxY;
-          if (bestCurvePxY != null) dragOffsetY = py - bestCurvePxY;
+  function interpolateCurvePxY(seriesIdx, px) {
+    const opt = myChart.getOption();
+    const s = opt && opt.series && opt.series[seriesIdx];
+    if (!s || !s.data) return null;
+    let bestCurvePxY = null;
+    let prevPx = null;
+    let closestDist = Infinity, closestPxY = null;
+    for (let di = 0; di < s.data.length; di++) {
+      if (!Array.isArray(s.data[di]) || s.data[di][1] == null) { prevPx = null; continue; }
+      const curPx = myChart.convertToPixel('grid', [s.data[di][0], s.data[di][1]]);
+      if (!curPx) { prevPx = null; continue; }
+      const xDist = Math.abs(curPx[0] - px);
+      if (xDist < closestDist) { closestDist = xDist; closestPxY = curPx[1]; }
+      if (xDist < 1) { bestCurvePxY = curPx[1]; break; }
+      if (prevPx) {
+        const minX = Math.min(prevPx[0], curPx[0]);
+        const maxX = Math.max(prevPx[0], curPx[0]);
+        if (px >= minX && px <= maxX && maxX > minX) {
+          const frac = (px - prevPx[0]) / (curPx[0] - prevPx[0]);
+          bestCurvePxY = prevPx[1] + frac * (curPx[1] - prevPx[1]);
           break;
         }
       }
+      prevPx = curPx;
+    }
+    return bestCurvePxY != null ? bestCurvePxY : closestPxY;
+  }
+
+  function onMouseDown(e) {
+    const px = e.offsetX, py = e.offsetY;
+    console.log('[PCurveDrag] mousedown at px=', px, 'py=', py);
+    const hit = hitTestSeries(px, py);
+    console.log('[PCurveDrag] hitTestSeries result:', hit);
+    if (hit) {
+      dragging = hit;
+      anchorXPx = px;
+      const tVal = getTAtPixelX(px);
+      anchorT = (tVal != null && tVal > 0) ? tVal : 1;
+
+      const curvePxY = interpolateCurvePxY(hit.seriesIdx, px);
+      dragOffsetY = curvePxY != null ? (py - curvePxY) : 0;
 
       myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
       e.event && e.event.preventDefault && e.event.preventDefault();
@@ -3363,35 +3345,157 @@ function setupPCurveDragHandles(cardId, myChart) {
     const newDataY = dp ? dp[1] : 0;
     if (newDataY <= 0) return;
 
-    const targetCurveKey = dragging.curveKey;
-    const ps = allPs[targetCurveKey];
-    if (!ps) return;
+    if (dragging.type === 'pcurve') {
+      const allPs = cardPCurveState[cardId] || {};
+      const ps = allPs[dragging.curveKey];
+      if (!ps) return;
 
-    let targetQi, targetB, targetModel;
-    if (targetCurveKey === 'main') {
-      targetQi = w.params.qi;
-      targetB = w.params.b;
-      targetModel = data.model || 'exponential';
-    } else {
-      const mfId = parseInt(targetCurveKey.replace('mf_', ''));
+      let targetQi, targetB, targetModel;
+      if (dragging.curveKey === 'main') {
+        targetQi = w.params.qi; targetB = w.params.b; targetModel = data.model || 'exponential';
+      } else {
+        const mfId = parseInt(dragging.curveKey.replace('mf_', ''));
+        const fits = cardMultiFits[cardId] || [];
+        const mf = fits.find(f => f.id === mfId);
+        if (!mf || !mf.params) return;
+        targetQi = mf.params.qi; targetB = mf.params.b; targetModel = mf.model;
+      }
+
+      const newDi = solveForDi(targetModel, targetQi, targetB, anchorT, newDataY);
+      const diKey = dragging.which === 'p10' ? 'p10Di' : 'p90Di';
+      ps[diKey] = newDi;
+      updatePCurveSeries(cardId, myChart, dragging.curveKey);
+
+    } else if (dragging.type === 'fitted') {
+      const targetModel = data.model || 'exponential';
+      const newDi = solveForDi(targetModel, w.params.qi, w.params.b, anchorT, newDataY);
+      w.params.di = newDi;
+
+      if (w.y_fitted) {
+        for (let i = 0; i < w.t.length; i++) {
+          if (w.y_fitted[i] != null) {
+            w.y_fitted[i] = evalDeclineModel(targetModel, w.t[i], w.params);
+          }
+        }
+      }
+      if (w.forecast && w.forecast.t && w.forecast.y) {
+        for (let i = 0; i < w.forecast.t.length; i++) {
+          w.forecast.y[i] = evalDeclineModel(targetModel, w.forecast.t[i], w.params);
+        }
+      }
+
+      const opt = myChart.getOption();
+      const isSingle = data.wells.length === 1;
+      const prefix = isSingle ? '' : (w.well || '') + ' ';
+      const fittedName = prefix + 'Fitted';
+      for (let si = 0; si < opt.series.length; si++) {
+        const s = opt.series[si];
+        if (s.name === fittedName && s.type === 'line') {
+          let combinedData = [];
+          if (w.y_fitted) {
+            combinedData = w.x.map((xv, i) => [isDate ? parseDateStr(xv) : xv, w.y_fitted[i]]).filter(p => p[1] != null);
+          }
+          if (w.forecast && w.forecast.x) {
+            w.forecast.x.forEach((xv, i) => combinedData.push([isDate ? parseDateStr(xv) : xv, w.forecast.y[i]]));
+          }
+          s.data = combinedData;
+          break;
+        }
+      }
+      const ps = (cardPCurveState[cardId] || {})['main'];
+      if (ps && ps.enabled) {
+        for (let si = 0; si < opt.series.length; si++) {
+          const s = opt.series[si];
+          if (!s.id) continue;
+          const parts = s.id.split('|');
+          if (parts.length >= 2 && parts[1] === 'main' && (parts[0] === 'p10' || parts[0] === 'p90')) {
+            const diVal = parts[0] === 'p10' ? ps.p10Di : ps.p90Di;
+            s.data = buildPCurveData(w, data, diVal, isDate, null);
+          }
+        }
+      }
+      myChart.setOption({ series: opt.series }, false);
+
+    } else if (dragging.type === 'multifit') {
       const fits = cardMultiFits[cardId] || [];
-      const mf = fits.find(f => f.id === mfId);
+      const mf = fits.find(f => f.id === dragging.mfId);
       if (!mf || !mf.params) return;
-      targetQi = mf.params.qi;
-      targetB = mf.params.b;
-      targetModel = mf.model;
+
+      const newDi = solveForDi(mf.model, mf.params.qi, mf.params.b, anchorT, newDataY);
+      mf.params.di = newDi;
+
+      if (mf.indices && w.t) {
+        const idxMin = Math.min(...mf.indices);
+        const idxMax = Math.max(...mf.indices);
+        mf.fittedData = [];
+        for (let i = idxMin; i <= Math.min(idxMax, w.t.length - 1); i++) {
+          const yVal = evalDeclineModel(mf.model, w.t[i], mf.params);
+          mf.fittedData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], yVal]);
+        }
+      }
+
+      const opt = myChart.getOption();
+      const mfName = 'Curve #' + mf.id + ' (' + mf.model + ')';
+      for (let si = 0; si < opt.series.length; si++) {
+        const s = opt.series[si];
+        if (s.name === mfName && s.type === 'line' && !s.id) {
+          let mfCombined = mf.fittedData ? [...mf.fittedData] : [];
+          const _fcMonths = parseFloat(document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+          const mfTMax = mf.indices && mf.indices.length > 0 && w.t
+            ? Math.max(...mf.indices.filter(i => i < w.t.length).map(i => w.t[i]))
+            : null;
+          if (_fcMonths && mfTMax != null) {
+            const MS_PER_DAY = 86400000;
+            const firstDateMs = isDate ? parseDateStr(w.x[0]) : 0;
+            const tOffset = w.t[0] || 0;
+            const x0 = w.x[0] || 0;
+            const nM = Math.round(_fcMonths);
+            for (let i = 1; i <= nM; i++) {
+              const tVal = mfTMax + 30.4375 * i;
+              const yVal = evalDeclineModel(mf.model, tVal, mf.params);
+              if (isDate) {
+                mfCombined.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+              } else {
+                mfCombined.push([tVal - tOffset + x0, yVal]);
+              }
+            }
+          }
+          s.data = mfCombined;
+          break;
+        }
+      }
+      const mfKey = 'mf_' + mf.id;
+      const mfPs = (cardPCurveState[cardId] || {})[mfKey];
+      if (mfPs && mfPs.enabled) {
+        for (let si = 0; si < opt.series.length; si++) {
+          const s = opt.series[si];
+          if (!s.id) continue;
+          const parts = s.id.split('|');
+          if (parts.length >= 2 && parts[1] === mfKey && (parts[0] === 'p10' || parts[0] === 'p90')) {
+            const diVal = parts[0] === 'p10' ? mfPs.p10Di : mfPs.p90Di;
+            const pParams = Object.assign({}, mf.params, { di: diVal });
+            const pData = [];
+            const idxMin = mf.indices ? Math.min(...mf.indices) : 0;
+            const idxMax = mf.indices ? Math.max(...mf.indices) : w.t.length - 1;
+            for (let i = idxMin; i <= Math.min(idxMax, w.t.length - 1); i++) {
+              pData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], evalDeclineModel(mf.model, w.t[i], pParams)]);
+            }
+            s.data = pData;
+          }
+        }
+      }
+      myChart.setOption({ series: opt.series }, false);
     }
 
-    const newDi = solveForDi(targetModel, targetQi, targetB, anchorT, newDataY);
-    const diKey = dragging.which === 'p10' ? 'p10Di' : 'p90Di';
-    ps[diKey] = newDi;
-
-    updatePCurveSeries(cardId, myChart, targetCurveKey);
     e.event && e.event.preventDefault && e.event.preventDefault();
   }
 
   function onMouseUp() {
     if (dragging) {
+      if (dragging.type === 'fitted' || dragging.type === 'multifit') {
+        saveZoomState(cardId);
+        renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+      }
       dragging = null;
       myChart.getDom().style.cursor = '';
     }
@@ -5059,16 +5163,9 @@ function renderSingleChart(cardId, data, forecastMonths) {
       }
     },
 
-    legend: {
-      data: legendData,
-      top: 30, // Move legend down to avoid overlap with title
-      left: 60,
-      right: 30, // Add right bound for wrap
-      type: 'scroll', // Allow scrolling if too many items
-      textStyle: { color: lbC, fontSize: 11 }
-    },
+    legend: { data: legendData, top: 4, left: 60, textStyle: { color: lbC, fontSize: 11 } },
 
-    grid: { left: gridLeft, right: gridRight, top: gridTop + 30, bottom: gridBottom }, // Increase top grid margin to fit legend below title
+    grid: { left: gridLeft, right: gridRight, top: gridTop, bottom: gridBottom },
 
     xAxis: {
 
