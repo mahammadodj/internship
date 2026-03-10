@@ -148,8 +148,10 @@ const cardLabelCollapseStates = {}; // { cardId: { actual: bool, p10: bool, ... 
 const cardAxisLabels = {};   // { cardId: {x:string, y:string} }
 const cardAxisPositions = {}; // { cardId: {x:'bottom'|'top', y:'left'|'right'} }
 const cardTableData = {};    // { cardId: [{well, section, time, actual, fitted}] }
+const cardTableMfData = {};  // { cardId: { 'mf_<id>': [{well, section, time, actual, fitted}] } }
 const cardTableSort = {};    // { cardId: {col:string, asc:boolean} }
 const cardTableFilter = {};  // { cardId: {well:string, section:string} }
+const cardTableCurveView = {}; // { cardId: { selected: Set<'main'|'mf_1'|...>, sideBySide: boolean } }
 const cardHeaders = {};      // { cardId: string }
 let _ctxMenuCardId = null;
 let _ctxMenuCoord = null;
@@ -1874,8 +1876,17 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
             </select>
             <button class="dt-filter-clear" onclick="clearTableFilter('${cardId}')" title="Clear filters">✕</button>
           </div>
+          <div class="dt-curve-selector-row" id="dtCurveSelectorRow-${cardId}" style="display:none;">
+            <div class="dt-curve-chips" id="dtCurveChips-${cardId}"></div>
+            <label class="dt-side-toggle" title="Show selected tables side by side">
+              <input type="checkbox" id="dtSideBySide-${cardId}" onchange="toggleTableSideBySide('${cardId}')">
+              <span>Side by side</span>
+            </label>
+          </div>
         </div>
-        <div class="table-wrap" id="forecastTable-${cardId}" style="max-height:250px; border:1px solid var(--border);"></div>
+        <div class="dt-tables-container" id="dtTablesContainer-${cardId}">
+          <div class="table-wrap" id="forecastTable-${cardId}" style="max-height:250px; border:1px solid var(--border);"></div>
+        </div>
       </div>
 
     </div>
@@ -5568,10 +5579,61 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     cardTableData[cardId] = tableRows;
 
+    // Build multi-fit curve table data
+    const mfDataMap = {};
+    const mfList = cardMultiFits[cardId] || [];
+    mfList.forEach(mf => {
+      const mfRows = [];
+      const w0 = allWellsData[0];
+      if (mf.fittedData && mf.fittedData.length > 0) {
+        mf.fittedData.forEach(pt => {
+          let xDisp = pt[0];
+          if (typeof xDisp === 'number' && !Number.isInteger(xDisp)) xDisp = parseFloat(xDisp.toFixed(4));
+          const yActual = _findActualForX(w0, pt[0], isDate);
+          mfRows.push({ well: w0 ? w0.well : '', section: 'Actual', time: isDate ? formatDateTs(pt[0]) : xDisp, actual: yActual, fitted: pt[1] != null ? pt[1] : null });
+        });
+      }
+      if (mf.forecastData && mf.forecastData.length > 0) {
+        const skipFirst = mf.fittedData && mf.fittedData.length > 0;
+        mf.forecastData.forEach((pt, fi) => {
+          if (skipFirst && fi === 0) return;
+          let xDisp = pt[0];
+          if (typeof xDisp === 'number' && !Number.isInteger(xDisp)) xDisp = parseFloat(xDisp.toFixed(4));
+          mfRows.push({ well: w0 ? w0.well : '', section: 'Forecast', time: isDate ? formatDateTs(pt[0]) : xDisp, actual: null, fitted: pt[1] != null ? pt[1] : null });
+        });
+      }
+      mfDataMap['mf_' + mf.id] = mfRows;
+    });
+    cardTableMfData[cardId] = mfDataMap;
+
+    // Reconcile curve view state: only include curves that exist AND have data
+    const _validTableKeys = new Set(['main']);
+    mfList.forEach(mf => {
+      const key = 'mf_' + mf.id;
+      const rows = mfDataMap[key] || [];
+      if (rows.length > 0) _validTableKeys.add(key);
+    });
+
+    if (!cardTableCurveView[cardId]) {
+      cardTableCurveView[cardId] = { selected: new Set(_validTableKeys), sideBySide: false };
+    } else {
+      const cv = cardTableCurveView[cardId];
+      // Prune keys for curves that no longer exist or have no data
+      for (const key of [...cv.selected]) {
+        if (!_validTableKeys.has(key)) cv.selected.delete(key);
+      }
+      // Auto-add newly created multi-fit curves that have data
+      for (const key of _validTableKeys) {
+        if (key !== 'main' && !cv.selected.has(key)) cv.selected.add(key);
+      }
+      if (cv.selected.size === 0) cv.selected.add('main');
+    }
+
     if (tableRows.length > 0) {
 
       if (ftSection) ftSection.style.display = 'block';
 
+      updateTableCurveChips(cardId);
       renderSortableTable(cardId);
 
     } else {
@@ -6636,6 +6698,13 @@ function removeCurve(cardId, type, id) {
       delete cardPCurveState[cardId]['mf_' + id];
     }
     if (cardOriginalParams[cardId]) delete cardOriginalParams[cardId]['mf_' + id];
+    // Clean up table state for the removed curve
+    const mfKey = 'mf_' + id;
+    if (cardTableMfData[cardId]) delete cardTableMfData[cardId][mfKey];
+    if (cardTableCurveView[cardId]) {
+      cardTableCurveView[cardId].selected.delete(mfKey);
+      if (cardTableCurveView[cardId].selected.size === 0) cardTableCurveView[cardId].selected.add('main');
+    }
   } else if (type === 'main') {
     const data = cardLastData[cardId];
     if (data && data.wells) {
@@ -6665,6 +6734,14 @@ function removeCurve(cardId, type, id) {
 /* Clear all multi-fit curves */
 function clearAllMultiFits(cardId) {
   delete cardMultiFits[cardId];
+  delete cardTableMfData[cardId];
+  if (cardTableCurveView[cardId]) {
+    const cv = cardTableCurveView[cardId];
+    for (const key of [...cv.selected]) {
+      if (key.startsWith('mf_')) cv.selected.delete(key);
+    }
+    if (cv.selected.size === 0) cv.selected.add('main');
+  }
   if (cardPCurveState[cardId]) {
     for (const key of Object.keys(cardPCurveState[cardId])) {
       if (key.startsWith('mf_')) delete cardPCurveState[cardId][key];
@@ -11401,134 +11478,294 @@ async function doDeleteColumnByName(col) {
 
    ==================================================================== */
 
-function renderSortableTable(cardId) {
+/* Helper: find actual y value at a given x for multi-fit table rows */
+function _findActualForX(w, xVal, isDate) {
+  if (!w || !w.x || !w.y_actual) return null;
+  if (isDate) {
+    const target = typeof xVal === 'number' ? xVal : parseDateStr(xVal);
+    for (let i = 0; i < w.x.length; i++) {
+      const ts = parseDateStr(w.x[i]);
+      if (Math.abs(ts - target) < 86400000) return typeof w.y_actual[i] === 'number' ? w.y_actual[i] : null;
+    }
+  } else {
+    for (let i = 0; i < w.x.length; i++) {
+      if (Math.abs(w.x[i] - xVal) < 1e-6) return typeof w.y_actual[i] === 'number' ? w.y_actual[i] : null;
+    }
+  }
+  return null;
+}
 
-  const ft = document.getElementById('forecastTable-' + cardId);
+/* Build the curve chip selector UI */
+function updateTableCurveChips(cardId) {
+  const chipsContainer = document.getElementById('dtCurveChips-' + cardId);
+  const selectorRow = document.getElementById('dtCurveSelectorRow-' + cardId);
+  if (!chipsContainer || !selectorRow) return;
 
-  if (!ft) return;
+  const mfList = cardMultiFits[cardId] || [];
+  const mfDataMap = cardTableMfData[cardId] || {};
+  // Only show chips for multi-fit curves that actually have table rows
+  const mfWithData = mfList.filter(mf => {
+    const rows = mfDataMap['mf_' + mf.id] || [];
+    return rows.length > 0;
+  });
+  if (mfWithData.length === 0) {
+    selectorRow.style.display = 'none';
+    return;
+  }
+  selectorRow.style.display = '';
 
-  const rows = cardTableData[cardId] || [];
+  const cv = cardTableCurveView[cardId] || { selected: new Set(['main']), sideBySide: false };
+  const st = readCardStyles(cardId);
+  const mfStylesObj = st.multiFitStyles || {};
 
-  const sortState = cardTableSort[cardId] || { col: null, asc: true };
+  let html = '';
+  const mainActive = cv.selected.has('main');
+  const mainColor = st.fittedColor || '#f59e0b';
+  html += `<button class="dt-curve-chip${mainActive ? ' active' : ''}" onclick="toggleTableCurve('${cardId}','main')" style="${mainActive ? 'border-color:' + mainColor + ';color:' + mainColor : ''}"><span class="dt-chip-dot" style="background:${mainColor}"></span>Main</button>`;
 
-  const filterState = cardTableFilter[cardId] || { well: '', section: '' };
-
-  // Apply filters
-
-  const wellQ = (filterState.well || '').trim().toLowerCase();
-
-  const sectionQ = filterState.section || '';
-
-  const filtered = rows.filter(r => {
-
-    if (wellQ && !String(r.well).toLowerCase().includes(wellQ)) return false;
-
-    if (sectionQ && r.section !== sectionQ) return false;
-
-    return true;
-
+  mfWithData.forEach(mf => {
+    const key = 'mf_' + mf.id;
+    const ms = mfStylesObj[key] || {};
+    const mfColor = ms.color || mf.color || '#8b5cf6';
+    const isActive = cv.selected.has(key);
+    html += `<button class="dt-curve-chip${isActive ? ' active' : ''}" onclick="toggleTableCurve('${cardId}','${key}')" style="${isActive ? 'border-color:' + mfColor + ';color:' + mfColor : ''}"><span class="dt-chip-dot" style="background:${mfColor}"></span>Curve #${mf.id}</button>`;
   });
 
-  // Update row count badge
+  chipsContainer.innerHTML = html;
 
-  const countEl = document.getElementById('dtRowCount-' + cardId);
+  const sideCheckbox = document.getElementById('dtSideBySide-' + cardId);
+  if (sideCheckbox) sideCheckbox.checked = cv.sideBySide;
+}
 
-  if (countEl) {
-
-    const isFiltered = wellQ || sectionQ;
-
-    countEl.textContent = isFiltered ? `${filtered.length} / ${rows.length} rows` : `${rows.length} rows`;
-
-    countEl.style.color = isFiltered ? 'var(--accent)' : 'var(--text-muted)';
-
+/* Toggle a curve in the table view */
+function toggleTableCurve(cardId, curveKey) {
+  const cv = cardTableCurveView[cardId] || { selected: new Set(['main']), sideBySide: false };
+  if (cv.selected.has(curveKey)) {
+    if (cv.selected.size > 1) cv.selected.delete(curveKey);
+  } else {
+    cv.selected.add(curveKey);
   }
+  cardTableCurveView[cardId] = cv;
+  updateTableCurveChips(cardId);
+  renderSortableTable(cardId);
+}
 
-  // Sort rows if a sort column is set
+/* Toggle side-by-side mode */
+function toggleTableSideBySide(cardId) {
+  const cv = cardTableCurveView[cardId] || { selected: new Set(['main']), sideBySide: false };
+  const cb = document.getElementById('dtSideBySide-' + cardId);
+  cv.sideBySide = cb ? cb.checked : !cv.sideBySide;
+  cardTableCurveView[cardId] = cv;
+  renderSortableTable(cardId);
+}
+
+/* Get rows for a given curve key */
+function _getTableRowsForCurve(cardId, curveKey) {
+  if (curveKey === 'main') return cardTableData[cardId] || [];
+  const mfMap = cardTableMfData[cardId] || {};
+  return mfMap[curveKey] || [];
+}
+
+/* Get curve label */
+function _getCurveLabel(cardId, curveKey) {
+  if (curveKey === 'main') return 'Main Curve';
+  const mfList = cardMultiFits[cardId] || [];
+  const id = parseInt(curveKey.replace('mf_', ''));
+  const mf = mfList.find(m => m.id === id);
+  if (!mf) return null; // curve no longer exists
+  return 'Curve #' + mf.id + ' (' + mf.model + ')';
+}
+
+/* Get curve color */
+function _getCurveColor(cardId, curveKey) {
+  if (curveKey === 'main') {
+    const st = readCardStyles(cardId);
+    return st.fittedColor || '#f59e0b';
+  }
+  const mfList = cardMultiFits[cardId] || [];
+  const id = parseInt(curveKey.replace('mf_', ''));
+  const mf = mfList.find(m => m.id === id);
+  const st = readCardStyles(cardId);
+  const ms = (st.multiFitStyles || {})[curveKey] || {};
+  return ms.color || (mf ? mf.color : '#8b5cf6');
+}
+
+/* Build HTML for a single table */
+function _buildTableHtml(cardId, curveKey, rows, sortState, filterState) {
+  const wellQ = (filterState.well || '').trim().toLowerCase();
+  const sectionQ = filterState.section || '';
+  const filtered = rows.filter(r => {
+    if (wellQ && !String(r.well).toLowerCase().includes(wellQ)) return false;
+    if (sectionQ && r.section !== sectionQ) return false;
+    return true;
+  });
 
   const sorted = [...filtered];
-
   if (sortState.col) {
-
     sorted.sort((a, b) => {
-
       let va = a[sortState.col], vb = b[sortState.col];
-
       if (va == null && vb == null) return 0;
-
       if (va == null) return 1;
-
       if (vb == null) return -1;
-
-      if (typeof va === 'string' && typeof vb === 'string') {
-
+      if (typeof va === 'string' && typeof vb === 'string')
         return sortState.asc ? va.localeCompare(vb) : vb.localeCompare(va);
-
-      }
-
       return sortState.asc ? va - vb : vb - va;
-
     });
-
   }
 
-
-
   const cols = [
-
     { key: 'well', label: 'Well' },
-
     { key: 'section', label: 'Section' },
-
     { key: 'time', label: 'Time' },
-
     { key: 'actual', label: 'Actual Rate' },
-
     { key: 'fitted', label: 'Fitted Rate' }
-
   ];
 
-
-
   let html = '<table style="font-size:0.75rem;"><thead><tr>';
-
   cols.forEach(c => {
-
     const isActive = sortState.col === c.key;
-
-    const arrow = isActive ? (sortState.asc ? ' ▲' : ' ▼') : '';
-
+    const arrow = isActive ? (sortState.asc ? ' \u25B2' : ' \u25BC') : '';
     const cls = isActive ? 'sortable-th active' : 'sortable-th';
-
     html += `<th class="${cls}" style="padding:6px 10px;background:var(--bg-input);cursor:pointer;" onclick="sortTable('${cardId}','${c.key}')">${c.label}<span class="sort-arrow${isActive ? ' active' : ''}">${arrow}</span></th>`;
-
   });
-
   html += '</tr></thead><tbody>';
 
-
-
   sorted.forEach(r => {
-
     const isFc = r.section === 'Forecast';
-
     const bg = isFc ? 'background:rgba(34,197,94,.06);' : '';
-
     const secColor = isFc ? 'color:var(--green);' : 'color:var(--accent);';
-
-    const actDisp = r.actual != null ? r.actual.toFixed(2) : (isFc ? '—' : '');
-
+    const actDisp = r.actual != null ? r.actual.toFixed(2) : (isFc ? '\u2014' : '');
     const fitDisp = r.fitted != null ? r.fitted.toFixed(2) : '';
-
     const timeDisp = typeof r.time === 'number' && !Number.isInteger(r.time) ? r.time.toFixed(4) : r.time;
-
     html += `<tr style="${bg}"><td style="padding:4px 10px;">${r.well}</td><td style="padding:4px 10px;${secColor}">${r.section}</td><td style="padding:4px 10px;">${timeDisp}</td><td style="padding:4px 10px;">${actDisp}</td><td style="padding:4px 10px;">${fitDisp}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  return { html, filtered: filtered.length, total: rows.length };
+}
 
+function renderSortableTable(cardId) {
+  const container = document.getElementById('dtTablesContainer-' + cardId);
+  if (!container) return;
+
+  const cv = cardTableCurveView[cardId] || { selected: new Set(['main']), sideBySide: false };
+  const sortState = cardTableSort[cardId] || { col: null, asc: true };
+  const filterState = cardTableFilter[cardId] || { well: '', section: '' };
+
+  // Filter out stale or empty keys before rendering
+  const selectedKeys = [...cv.selected].filter(key => {
+    if (key === 'main') return true;
+    const label = _getCurveLabel(cardId, key);
+    if (!label) return false; // curve no longer exists
+    const rows = _getTableRowsForCurve(cardId, key);
+    return rows.length > 0; // skip curves with no data
   });
 
-  html += '</tbody></table>';
+  const isSideBySide = cv.sideBySide && selectedKeys.length > 1;
 
-  ft.innerHTML = html;
+  let totalFiltered = 0, totalAll = 0;
 
+  if (isSideBySide) {
+    container.className = 'dt-tables-container dt-side-by-side';
+    container.innerHTML = '';
+    selectedKeys.forEach(key => {
+      const rows = _getTableRowsForCurve(cardId, key);
+      const label = _getCurveLabel(cardId, key);
+      const color = _getCurveColor(cardId, key);
+      const result = _buildTableHtml(cardId, key, rows, sortState, filterState);
+      totalFiltered += result.filtered;
+      totalAll += result.total;
+      const panel = document.createElement('div');
+      panel.className = 'dt-table-panel';
+      panel.innerHTML = `<div class="dt-table-panel-header" style="border-left:3px solid ${color}"><span>${label}</span><span class="dt-panel-count">${result.filtered} rows</span></div><div class="table-wrap" style="max-height:250px; border:1px solid var(--border);">${result.html}</div>`;
+      container.appendChild(panel);
+    });
+  } else {
+    container.className = 'dt-tables-container';
+    // Merge all selected curve rows
+    let allRows = [];
+    selectedKeys.forEach(key => {
+      const rows = _getTableRowsForCurve(cardId, key);
+      if (selectedKeys.length > 1) {
+        const label = _getCurveLabel(cardId, key);
+        rows.forEach(r => allRows.push({ ...r, _curveLabel: label }));
+      } else {
+        allRows = allRows.concat(rows);
+      }
+    });
+    totalAll = allRows.length;
+
+    const ft = document.getElementById('forecastTable-' + cardId);
+    if (!ft) {
+      container.innerHTML = `<div class="table-wrap" id="forecastTable-${cardId}" style="max-height:250px; border:1px solid var(--border);"></div>`;
+    }
+    const ftEl = document.getElementById('forecastTable-' + cardId);
+
+    // If multiple curves merged, add a Curve column
+    const hasCurveCol = selectedKeys.length > 1;
+    const wellQ = (filterState.well || '').trim().toLowerCase();
+    const sectionQ = filterState.section || '';
+    const filtered = allRows.filter(r => {
+      if (wellQ && !String(r.well).toLowerCase().includes(wellQ)) return false;
+      if (sectionQ && r.section !== sectionQ) return false;
+      return true;
+    });
+    totalFiltered = filtered.length;
+
+    const sorted = [...filtered];
+    if (sortState.col) {
+      sorted.sort((a, b) => {
+        let va = a[sortState.col], vb = b[sortState.col];
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        if (typeof va === 'string' && typeof vb === 'string')
+          return sortState.asc ? va.localeCompare(vb) : vb.localeCompare(va);
+        return sortState.asc ? va - vb : vb - va;
+      });
+    }
+
+    const cols = [
+      { key: 'well', label: 'Well' },
+      { key: 'section', label: 'Section' },
+      { key: 'time', label: 'Time' },
+      { key: 'actual', label: 'Actual Rate' },
+      { key: 'fitted', label: 'Fitted Rate' }
+    ];
+    if (hasCurveCol) cols.unshift({ key: '_curveLabel', label: 'Curve' });
+
+    let html = '<table style="font-size:0.75rem;"><thead><tr>';
+    cols.forEach(c => {
+      const isActive = sortState.col === c.key;
+      const arrow = isActive ? (sortState.asc ? ' \u25B2' : ' \u25BC') : '';
+      const cls = isActive ? 'sortable-th active' : 'sortable-th';
+      html += `<th class="${cls}" style="padding:6px 10px;background:var(--bg-input);cursor:pointer;" onclick="sortTable('${cardId}','${c.key}')">${c.label}<span class="sort-arrow${isActive ? ' active' : ''}">${arrow}</span></th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    sorted.forEach(r => {
+      const isFc = r.section === 'Forecast';
+      const bg = isFc ? 'background:rgba(34,197,94,.06);' : '';
+      const secColor = isFc ? 'color:var(--green);' : 'color:var(--accent);';
+      const actDisp = r.actual != null ? r.actual.toFixed(2) : (isFc ? '\u2014' : '');
+      const fitDisp = r.fitted != null ? r.fitted.toFixed(2) : '';
+      const timeDisp = typeof r.time === 'number' && !Number.isInteger(r.time) ? r.time.toFixed(4) : r.time;
+      html += `<tr style="${bg}">`;
+      if (hasCurveCol) html += `<td style="padding:4px 10px;font-weight:500;">${r._curveLabel || ''}</td>`;
+      html += `<td style="padding:4px 10px;">${r.well}</td><td style="padding:4px 10px;${secColor}">${r.section}</td><td style="padding:4px 10px;">${timeDisp}</td><td style="padding:4px 10px;">${actDisp}</td><td style="padding:4px 10px;">${fitDisp}</td></tr>`;
+    });
+    html += '</tbody></table>';
+    if (ftEl) ftEl.innerHTML = html;
+  }
+
+  // Update row count badge
+  const countEl = document.getElementById('dtRowCount-' + cardId);
+  if (countEl) {
+    const wellQ = (filterState.well || '').trim().toLowerCase();
+    const sectionQ = filterState.section || '';
+    const isFiltered = wellQ || sectionQ;
+    countEl.textContent = isFiltered ? `${totalFiltered} / ${totalAll} rows` : `${totalAll} rows`;
+    countEl.style.color = isFiltered ? 'var(--accent)' : 'var(--text-muted)';
+  }
 }
 
 
@@ -11584,63 +11821,50 @@ function clearTableFilter(cardId) {
 
 
 function downloadTableCSV(cardId) {
-
-  const rows = cardTableData[cardId] || [];
-
-  if (rows.length === 0) return;
-
-  const sortState = cardTableSort[cardId] || { col: null, asc: true };
-
-  const sorted = [...rows];
-
-  if (sortState.col) {
-
-    sorted.sort((a, b) => {
-
-      let va = a[sortState.col], vb = b[sortState.col];
-
-      if (va == null && vb == null) return 0;
-
-      if (va == null) return 1;
-
-      if (vb == null) return -1;
-
-      if (typeof va === 'string' && typeof vb === 'string') return sortState.asc ? va.localeCompare(vb) : vb.localeCompare(va);
-
-      return sortState.asc ? va - vb : vb - va;
-
-    });
-
-  }
-
-  let csv = 'Well,Section,Time,Actual Rate,Fitted Rate\n';
-
-  sorted.forEach(r => {
-
-    const act = r.actual != null ? r.actual.toFixed(2) : '';
-
-    const fit = r.fitted != null ? r.fitted.toFixed(2) : '';
-
-    const time = typeof r.time === 'number' && !Number.isInteger(r.time) ? r.time.toFixed(4) : r.time;
-
-    csv += `"${r.well}","${r.section}","${time}","${act}","${fit}"\n`;
-
+  const cv = cardTableCurveView[cardId] || { selected: new Set(['main']), sideBySide: false };
+  const selectedKeys = [...cv.selected];
+  let allRows = [];
+  const hasCurveCol = selectedKeys.length > 1;
+  selectedKeys.forEach(key => {
+    const rows = _getTableRowsForCurve(cardId, key);
+    if (hasCurveCol) {
+      const label = _getCurveLabel(cardId, key);
+      rows.forEach(r => allRows.push({ ...r, _curveLabel: label }));
+    } else {
+      allRows = allRows.concat(rows);
+    }
   });
-
+  if (allRows.length === 0) return;
+  const sortState = cardTableSort[cardId] || { col: null, asc: true };
+  const sorted = [...allRows];
+  if (sortState.col) {
+    sorted.sort((a, b) => {
+      let va = a[sortState.col], vb = b[sortState.col];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === 'string' && typeof vb === 'string') return sortState.asc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return sortState.asc ? va - vb : vb - va;
+    });
+  }
+  let header = hasCurveCol ? 'Curve,' : '';
+  header += 'Well,Section,Time,Actual Rate,Fitted Rate\n';
+  let csv = header;
+  sorted.forEach(r => {
+    const act = r.actual != null ? r.actual.toFixed(2) : '';
+    const fit = r.fitted != null ? r.fitted.toFixed(2) : '';
+    const time = typeof r.time === 'number' && !Number.isInteger(r.time) ? r.time.toFixed(4) : r.time;
+    let line = hasCurveCol ? `"${r._curveLabel || ''}",` : '';
+    line += `"${r.well}","${r.section}","${time}","${act}","${fit}"\n`;
+    csv += line;
+  });
   const blob = new Blob([csv], { type: 'text/csv' });
-
   const url = URL.createObjectURL(blob);
-
   const a = document.createElement('a');
-
   a.href = url;
-
   a.download = `dca_table_${cardId.replace('card-', '')}.csv`;
-
   a.click();
-
   URL.revokeObjectURL(url);
-
 }
 
 
