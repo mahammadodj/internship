@@ -28,15 +28,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
     if (btn.dataset.tab === 'editor') loadEditorPage(editorPage);
 
-    // Show/hide the DCA sidebar toggle based on active tab
-    const sidebarToggle = document.getElementById('dcaSidebarToggle');
-    if (sidebarToggle) {
-      if (btn.dataset.tab === 'dca') {
-        sidebarToggle.style.display = _dcaSidebarOpen ? 'none' : 'flex';
-      } else {
-        sidebarToggle.style.display = 'none';
-      }
-    }
   });
 
 
@@ -7080,7 +7071,7 @@ function updateRestoreHiddenBtn(cardId) {
    ==================================================================== */
 
 const dcaTemplates = [];           // Array of template objects
-let _dcaSidebarOpen = true;        // sidebar visible by default
+let _dcaSidebarOpen = false;       // sidebar hidden by default
 
 /* Collect full template state from a card */
 function _collectTemplateFromCard(cardId) {
