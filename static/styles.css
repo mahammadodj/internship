@@ -1066,7 +1066,6 @@ button.btn-sm {
   display: flex;
   flex-direction: row;
   gap: 12px;
-  align-items: stretch;
 }
 
 .style-curves-container {
@@ -1121,21 +1120,25 @@ button.btn-sm {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
 }
 
 .style-row .style-check {
   white-space: nowrap;
   flex-shrink: 0;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
+  padding: 2px 4px;
+  background: var(--bg-input);
+  border-radius: 2px;
 }
 
 .style-row select {
   flex: 0 1 auto;
-  min-width: 80px;
-  height: 24px;
-  font-size: 0.7rem;
+  min-width: 100px;
+  height: 28px;
+  padding: 0 4px;
+  font-size: 0.75rem;
+  line-height: normal;
 }
 
 .style-row input[type="range"] {
@@ -1184,11 +1187,13 @@ text-transform: uppercase;
 .style-row select,
 .style-row input[type="range"] {
   height: 28px;
+  padding: 0 4px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 0.75rem;
   color: var(--text);
+  line-height: normal;
 }
 
 .style-row input[type="range"] {

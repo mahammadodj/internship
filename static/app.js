@@ -1757,21 +1757,20 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
     <div class="style-panel" id="style-${cardId}">
       <div class="style-curves-container" id="styleCurves-${cardId}">
-        <div class="style-section-title" style="margin-bottom: 12px; font-size: 0.75rem;">Curve Styles</div>
       </div>
       <div class="style-section">
-        <div class="style-section-title">Layout</div>
         <div class="style-row">
           <span class="style-label">Actual Pts</span>
           <div style="display:flex; gap:8px; align-items:center;">
             <input type="color" class="s-actual-color" value="#3b82f6" title="Color">
-            <select class="s-actual-symbol" style="flex:1;">
+            <label class="style-check"><input type="checkbox" class="s-actual-show" checked> Points</label>
+            <select class="s-actual-symbol" style="flex:1; height:28px; padding:0 4px; font-size:0.75rem;">
               <option value="circle">● Circle</option>
               <option value="diamond">◆ Diamond</option>
               <option value="rect">■ Square</option>
               <option value="triangle" selected>▲ Triangle</option>
             </select>
-            <input type="range" class="s-actual-size" min="2" max="20" value="14" title="Size" style="width:60px;">
+            <input type="range" class="s-actual-size" min="2" max="25" value="14" title="Size" style="flex:1;">
             <span class="s-actual-size-val style-range-val">14</span>
           </div>
         </div>
@@ -2164,6 +2163,7 @@ function rebuildCurveStyleSections(cardId) {
     const isMulti = !isSingle;
     const defFittedColor = isMulti ? (palette[wIdx % palette.length]) : (cs.fittedColor || stored.fittedColor || defaults.fittedColor);
     const fittedColor = cs.fittedColor || defFittedColor;
+    const fittedLine = cs.fittedLine != null ? cs.fittedLine : (stored.fittedLine != null ? stored.fittedLine : true);
     const fittedStyle = cs.fittedStyle || stored.fittedStyle || defaults.fittedStyle;
     const fittedWidth = cs.fittedWidth != null ? cs.fittedWidth : (stored.fittedWidth != null ? stored.fittedWidth : defaults.fittedWidth);
     const fittedMarkers = cs.fittedMarkers != null ? cs.fittedMarkers : (stored.fittedMarkers != null ? stored.fittedMarkers : defaults.fittedMarkers);
@@ -2194,21 +2194,17 @@ function rebuildCurveStyleSections(cardId) {
 
     html += '<div class="style-section style-curve-section" ' + dw + ' data-curve-key="' + esc(sectionKey) + '" data-series-name="' + esc(seriesName) + '"' + (isActive ? '' : ' style="display:none"') + '>';
 
-    /* Curve */
-    html += '<div class="style-row"><span class="style-label">Curve</span><div>'
+    /* Main Curve & Markers */
+    html += '<div class="style-row"><span class="style-label">Curve Style</span><div>'
       + '<input type="color" class="sc-fitted-color" ' + dw + ' value="' + fittedColor + '">'
-      + '<select class="sc-fitted-style" ' + dw + '>' + sel(lineOpts, fittedStyle) + '</select>'
-      + '<input type="range" class="sc-fitted-width" ' + dw + ' min="1" max="6" value="' + fittedWidth + '" title="Width">'
-      + '<span class="style-range-val">' + fittedWidth + '</span>'
-      + '</div></div>';
-
-    /* Markers */
-    html += '<div class="style-row"><span class="style-label">Markers</span><div>'
-      + '<label class="style-check"><input type="checkbox" class="sc-fitted-markers" ' + dw + chk(fittedMarkers) + '> Show</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-fitted-line" ' + dw + chk(fittedLine) + '> Line</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-fitted-markers" ' + dw + chk(fittedMarkers) + '> Markers</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-fitted-labels" ' + dw + chk(fittedLabels) + '> Labels</label>'
+      + '<select class="sc-fitted-style" ' + dw + '>' + sel(lineOpts, fittedStyle) + '</select>'
       + '<select class="sc-fitted-symbol" ' + dw + '>' + sel(symOpts, fittedSymbol) + '</select>'
-      + '<input type="range" class="sc-fitted-msize" ' + dw + ' min="2" max="25" value="' + fittedSymbolSize + '" title="Size">'
-      + '<span class="style-range-val">' + fittedSymbolSize + '</span>'
+      + '<input type="range" class="sc-fitted-width" ' + dw + ' min="1" max="6" value="' + fittedWidth + '" title="Line Width">'
+      + '<input type="range" class="sc-fitted-msize" ' + dw + ' min="2" max="25" value="' + fittedSymbolSize + '" title="Marker Size">'
+      + '<span class="style-range-val">' + fittedWidth + '/' + fittedSymbolSize + '</span>'
       + '</div></div>';
 
     /* P10/P90 */
@@ -2245,6 +2241,7 @@ function rebuildCurveStyleSections(cardId) {
     const ms = mfStyles[mfKey] || {};
     const mfColor = ms.color || mf.color || '#8b5cf6';
     const mfLineStyle = ms.lineStyle || stored.fittedStyle || defaults.fittedStyle;
+    const mfLine = ms.showLine != null ? ms.showLine : true;
     const mfWidth = ms.lineWidth != null ? ms.lineWidth : (stored.fittedWidth != null ? stored.fittedWidth : defaults.fittedWidth);
     const mfP10Color = ms.p10Color || mfColor;
     const mfP10Line = ms.p10Line != null ? ms.p10Line : (stored.p10Line != null ? stored.p10Line : defaults.p10Line);
@@ -2267,23 +2264,21 @@ function rebuildCurveStyleSections(cardId) {
 
     html += '<div class="style-section style-curve-section style-mf-section" data-mf-id="' + mf.id + '" data-curve-key="' + esc(sectionKey) + '" data-series-name="' + esc(mfSeriesName) + '"' + (isActive ? '' : ' style="display:none"') + '>';
 
-    html += '<div class="style-row"><span class="style-label">Curve</span><div>'
-      + '<input type="color" class="sc-mf-color" data-mf-id="' + mf.id + '" value="' + mfColor + '">'
-      + '<select class="sc-mf-line-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfLineStyle) + '</select>'
-      + '<input type="range" class="sc-mf-line-width" data-mf-id="' + mf.id + '" min="1" max="6" value="' + mfWidth + '" title="Width">'
-      + '<span class="style-range-val">' + mfWidth + '</span>'
-      + '</div></div>';
-
     const mfMarkers = ms.showMarkers != null ? ms.showMarkers : (stored.fittedMarkers != null ? stored.fittedMarkers : defaults.fittedMarkers);
     const mfMarkerSymbol = ms.markerSymbol || stored.fittedSymbol || defaults.fittedSymbol;
     const mfMarkerSize = ms.markerSize != null ? ms.markerSize : (stored.fittedSymbolSize != null ? stored.fittedSymbolSize : defaults.fittedSymbolSize);
     const mfShowLabels = ms.showLabels != null ? ms.showLabels : (stored.fittedLabels != null ? stored.fittedLabels : defaults.fittedLabels);
-    html += '<div class="style-row"><span class="style-label">Markers</span><div>'
-      + '<label class="style-check"><input type="checkbox" class="sc-mf-markers" data-mf-id="' + mf.id + '"' + chk(mfMarkers) + '> Show</label>'
+
+    html += '<div class="style-row"><span class="style-label">Curve Style</span><div>'
+      + '<input type="color" class="sc-mf-color" data-mf-id="' + mf.id + '" value="' + mfColor + '">'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-line" data-mf-id="' + mf.id + '"' + chk(mfLine) + '> Line</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-mf-markers" data-mf-id="' + mf.id + '"' + chk(mfMarkers) + '> Markers</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-labels" data-mf-id="' + mf.id + '"' + chk(mfShowLabels) + '> Labels</label>'
+      + '<select class="sc-mf-line-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfLineStyle) + '</select>'
       + '<select class="sc-mf-symbol" data-mf-id="' + mf.id + '">' + sel(symOpts, mfMarkerSymbol) + '</select>'
-      + '<input type="range" class="sc-mf-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfMarkerSize + '" title="Size">'
-      + '<span class="style-range-val">' + mfMarkerSize + '</span>'
+      + '<input type="range" class="sc-mf-line-width" data-mf-id="' + mf.id + '" min="1" max="6" value="' + mfWidth + '" title="Line Width">'
+      + '<input type="range" class="sc-mf-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfMarkerSize + '" title="Marker Size">'
+      + '<span class="style-range-val">' + mfWidth + '/' + mfMarkerSize + '</span>'
       + '</div></div>';
 
     html += '<div class="style-row"><span class="style-label">P10 Curve</span><div>'
@@ -2500,6 +2495,7 @@ function readCardStyles(cardId) {
   if (!card) return getDefaultStyles();
 
   const globalActualColor = card.querySelector('.s-actual-color')?.value || '#3b82f6';
+  const globalActualShow = card.querySelector('.s-actual-show')?.checked !== false;
   const globalActualSymbol = card.querySelector('.s-actual-symbol')?.value || 'triangle';
   const globalActualSize = parseInt(card.querySelector('.s-actual-size')?.value || '14');
 
@@ -2512,9 +2508,11 @@ function readCardStyles(cardId) {
     const q = (cls) => sec.querySelector('.' + cls);
     curveStyles[wellName] = {
       actualColor: globalActualColor,
+      actualShow: globalActualShow,
       actualSymbol: globalActualSymbol,
       actualSize: globalActualSize,
       fittedColor: q('sc-fitted-color')?.value || '#f59e0b',
+      fittedLine: q('sc-fitted-line')?.checked !== false,
       fittedStyle: q('sc-fitted-style')?.value || 'solid',
       fittedWidth: parseInt(q('sc-fitted-width')?.value || '2'),
       fittedMarkers: q('sc-fitted-markers')?.checked || false,
@@ -2522,6 +2520,7 @@ function readCardStyles(cardId) {
       fittedSymbol: q('sc-fitted-symbol')?.value || 'triangle',
       fittedSymbolSize: parseInt(q('sc-fitted-msize')?.value || '14'),
       forecastColor: q('sc-fitted-color')?.value || '#f59e0b',
+      forecastLine: q('sc-fitted-line')?.checked !== false,
       forecastStyle: q('sc-fitted-style')?.value || 'solid',
       forecastWidth: parseInt(q('sc-fitted-width')?.value || '2'),
       forecastMarkers: q('sc-fitted-markers')?.checked || false,
@@ -2554,6 +2553,7 @@ function readCardStyles(cardId) {
     multiFitStyles['mf_' + mfId] = {
       color: q('sc-mf-color')?.value || '#8b5cf6',
       lineStyle: q('sc-mf-line-style')?.value || 'solid',
+      showLine: q('sc-mf-line')?.checked !== false,
       lineWidth: parseFloat(q('sc-mf-line-width')?.value || '2.5'),
       showMarkers: q('sc-mf-markers')?.checked !== false,
       markerSymbol: q('sc-mf-symbol')?.value || 'triangle',
@@ -4725,6 +4725,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     const wColor = cs.actualColor || st.actualColor;
 
+    const wActualShow = cs.actualShow !== false;
+
     const wFitColor = cs.fittedColor || st.fittedColor;
 
     const wFcColor = cs.forecastColor || st.forecastColor;
@@ -4732,6 +4734,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
     const wActualSymbol = cs.actualSymbol || st.actualSymbol;
     const wActualSize = cs.actualSize != null ? cs.actualSize : st.actualSize;
     const wFittedStyle = cs.fittedStyle || st.fittedStyle;
+    const wFittedLine = cs.fittedLine !== false;
     const wFittedWidth = cs.fittedWidth != null ? cs.fittedWidth : st.fittedWidth;
     const wFittedMarkers = cs.fittedMarkers != null ? cs.fittedMarkers : st.fittedMarkers;
     const wFittedLabels = cs.fittedLabels != null ? cs.fittedLabels : st.fittedLabels;
@@ -4774,11 +4777,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       }
 
-      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: wActualSize, symbol: wActualSymbol, itemStyle: { color: wColor }, data: incD });
+      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: wActualShow ? wActualSize : 0, symbol: wActualSymbol, itemStyle: { color: wColor }, data: incD });
 
-      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: wActualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: wActualShow ? wActualSize : 0, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
-      if (isSingle && anchorD.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: wActualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD, z: 10 });
+      if (isSingle && anchorD.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: wActualShow ? wActualSize + 6 : 0, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD, z: 10 });
 
       if (isSingle && wIdx === 0) {
         mfIndexMeta.forEach(m => {
@@ -4825,7 +4828,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           series.push({
             name: prefix + 'Fitted', type: 'line',
             showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
-            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'solid' },
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedLine ? wFittedWidth : 0, type: 'solid' },
             itemStyle: { color: wFitColor },
             label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
             data: fittedPoints
@@ -4835,7 +4838,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           series.push({
             name: '_' + prefix + 'Forecast', type: 'line',
             showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
-            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'dashed' },
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedLine ? wFittedWidth : 0, type: 'dashed' },
             itemStyle: { color: wFitColor }, data: forecastPoints
           });
         }
@@ -4861,11 +4864,11 @@ function renderSingleChart(cardId, data, forecastMonths) {
         else incD.push(pt);
       }
 
-      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: wActualSize, symbol: wActualSymbol, itemStyle: { color: wColor }, data: incD });
+      series.push({ name: prefix + 'Actual', type: 'scatter', symbolSize: wActualShow ? wActualSize : 0, symbol: wActualSymbol, itemStyle: { color: wColor }, data: incD });
 
-      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: wActualSize, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
+      if (isSingle && exclD.length > 0) series.push({ name: 'Excluded', type: 'scatter', symbolSize: wActualShow ? wActualSize : 0, symbol: 'diamond', itemStyle: { color: '#ef4444', opacity: 0.5 }, data: exclD });
 
-      if (isSingle && anchorD2.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: wActualSize + 6, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD2, z: 10 });
+      if (isSingle && anchorD2.length > 0) series.push({ name: 'Qi Anchor', type: 'scatter', symbolSize: wActualShow ? wActualSize + 6 : 0, symbol: 'pin', itemStyle: { color: '#f97316', borderColor: '#fff', borderWidth: 1.5 }, data: anchorD2, z: 10 });
 
       if (isSingle && wIdx === 0) {
         mfIndexMeta.forEach(m => {
@@ -4912,7 +4915,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           series.push({
             name: prefix + 'Fitted', type: 'line',
             showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
-            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'solid' },
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedLine ? wFittedWidth : 0, type: 'solid' },
             itemStyle: { color: wFitColor },
             label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
             data: fittedPoints
@@ -4922,7 +4925,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           series.push({
             name: '_' + prefix + 'Forecast', type: 'line',
             showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
-            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'dashed' },
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedLine ? wFittedWidth : 0, type: 'dashed' },
             itemStyle: { color: wFitColor }, data: forecastPoints
           });
         }
@@ -5105,6 +5108,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
       const mfColor = ms.color || mf.color;
       const mfLineStyle = ms.lineStyle || 'solid';
       const mfLineWidth = ms.lineWidth != null ? ms.lineWidth : 2.5;
+      const mfShowLine = ms.showLine !== false;
       const mfName = 'Curve #' + mf.id + ' (' + mf.model + ')';
 
       /* Latest t value among included indices */
@@ -5149,7 +5153,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           showSymbol: ms.showMarkers != null ? ms.showMarkers : (st.fittedMarkers != null ? st.fittedMarkers : true),
           symbol: ms.markerSymbol || st.fittedSymbol || 'triangle',
           symbolSize: ms.markerSize != null ? ms.markerSize : (st.fittedSymbolSize != null ? st.fittedSymbolSize : 14),
-          smooth: false, lineStyle: { color: mfColor, width: mfLineWidth, type: 'solid' },
+          smooth: false, lineStyle: { color: mfColor, width: mfShowLine ? mfLineWidth : 0, type: mfLineStyle },
           itemStyle: { color: mfColor },
           label: (ms.showLabels != null ? ms.showLabels : st.fittedLabels) ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: mfFitted, z: 5,
@@ -5162,7 +5166,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           symbol: ms.markerSymbol || st.fittedSymbol || 'triangle',
           symbolSize: ms.markerSize != null ? ms.markerSize : (st.fittedSymbolSize != null ? st.fittedSymbolSize : 14),
           smooth: false,
-          lineStyle: { color: mfColor, width: mfLineWidth, type: 'dashed' },
+          lineStyle: { color: mfColor, width: mfShowLine ? mfLineWidth : 0, type: 'dashed' },
           itemStyle: { color: mfColor }, data: mfForecast, z: 5,
         });
       }
