@@ -1,4 +1,4 @@
-/* ====================================================================
+﻿/* ====================================================================
 
    DCA Pro – Application JavaScript
 
@@ -161,7 +161,7 @@ const cardHiddenSeries = {};      // cardId -> Set<seriesName> of manually remov
 const cardActiveCurveStyle = {};  // cardId -> 'well:wellName' or 'mf:id' identifying the visible style section
 const cardOriginalParams = {};    // cardId -> { main: {params}, mf_<id>: {params} } — snapshot of fitted params before user drags
 let _multiFitNextId = 1;
-const MULTI_FIT_COLORS = ['#e040fb', '#00bcd4', '#ff9800', '#8bc34a', '#ff5722', '#9c27b0', '#009688', '#ffc107', '#795548', '#607d8b'];
+const MULTI_FIT_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#f43f5e', '#14b8a6', '#f97316', '#4f46e5', '#64748b'];
 let _multiPointMenuJustOpened = false;
 
 /* Save a snapshot of curve params so the user can reset after dragging */
@@ -1783,17 +1783,9 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
           </div>
         </div>
         <div class="style-row">
-          <span class="style-label">Header</span>
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <input type="color" class="s-header-color" value="#e2e8f0" title="Color">
-            <input type="range" class="s-header-fsize" min="0.8" max="4.0" step="0.1" value="1.8" title="Size" style="width:60px;">
-            <span class="s-header-fsize-val style-range-val">1.8</span>
-            <label class="style-check"><input type="checkbox" class="s-header-bold"> Bold</label>
-            <select class="s-header-align" style="flex:1; min-width:70px;">
-              <option value="left">Left</option>
-              <option value="center">Center</option>
-              <option value="right">Right</option>
-            </select>
+          <span class="style-label">DI Decimals</span>
+          <div style="display:flex;">
+            <input type="number" class="s-di-decimals" min="0" max="10" value="4" style="width:60px;">
           </div>
         </div>
       </div>
@@ -1905,6 +1897,12 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
   headerInput.addEventListener('input', () => {
     cardHeaders[cardId] = headerInput.value;
     headerDiv.classList.toggle('has-content', headerInput.value.trim().length > 0);
+  });
+
+  // Double-click to show header settings popup
+  headerInput.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    showHeaderSettingsPopup(cardId, e.clientX, e.clientY);
   });
 
   cardWrap.appendChild(headerDiv);
@@ -2027,7 +2025,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       headerEl.style.fontSize = st.headerFontSize + 'rem';
       headerEl.style.color = st.headerColor;
       headerEl.style.fontWeight = st.headerFontWeight || 'normal';
-      headerEl.style.textAlign = st.headerTextAlign || 'left';
+      headerEl.style.textAlign = st.headerTextAlign || 'center';
     }
     if (chartInstances[cardId] && cardLastData[cardId]) {
       saveZoomState(cardId);
@@ -2050,7 +2048,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
   });
 
-  card.querySelectorAll('.style-panel input[type="color"], .style-panel select, .style-panel input[type="checkbox"]').forEach(el => {
+  card.querySelectorAll('.style-panel input[type="color"], .style-panel select, .style-panel input[type="checkbox"], .style-panel input[type="number"]').forEach(el => {
 
     el.addEventListener('change', () => {
       if (!el.classList.contains('s-plot-theme') && plotThemeSelect && plotThemeSelect.value !== 'custom') {
@@ -2088,7 +2086,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 
 function getDefaultStyles() {
-  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'triangle', actualSize: 14, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedLabels: false, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p10Symbol: 'circle', p10SymbolSize: 6, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, p90Symbol: 'circle', p90SymbolSize: 6, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  return { plotTheme: 'classic', actualColor: '#2563eb', actualSymbol: 'triangle', actualSize: 14, fittedColor: '#d97706', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedLabels: false, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#059669', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#059669', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p10Symbol: 'circle', p10SymbolSize: 6, p90Color: '#dc2626', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, p90Symbol: 'circle', p90SymbolSize: 6, gridX: true, gridY: true, headerFontSize: 2.1, headerColor: isLight ? '#000000' : '#ffffff', headerFontWeight: 'normal', headerTextAlign: 'center', diDecimals: 4 };
 }
 
 /* Build per-curve style HTML sections inside the style panel.
@@ -2622,6 +2621,8 @@ function readCardStyles(cardId) {
 
     gridY: card.querySelector('.s-grid-y')?.checked !== false,
 
+    diDecimals: parseInt(card.querySelector('.s-di-decimals')?.value || '4'),
+
     headerFontSize: parseFloat(card.querySelector('.s-header-fsize')?.value || '1.8'),
     headerColor: card.querySelector('.s-header-color')?.value || (document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0'),
     headerFontWeight: card.querySelector('.s-header-bold')?.checked ? 'bold' : 'normal',
@@ -2677,6 +2678,8 @@ function applyStylesToCard(cardId, styles) {
   const gx = card.querySelector('.s-grid-x'); if (gx) gx.checked = merged.gridX !== false;
 
   const gy = card.querySelector('.s-grid-y'); if (gy) gy.checked = merged.gridY !== false;
+
+  s('.s-di-decimals', merged.diDecimals != null ? merged.diDecimals : 4);
 
   s('.s-header-fsize', merged.headerFontSize || 1.8);
   s('.s-header-color', merged.headerColor || (document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0'));
@@ -4569,25 +4572,27 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   if (formulaDiv) {
 
-    const fmt = (v) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(4)) : v;
+    const multiFits = cardMultiFits[cardId] || [];
+    const st = cardStyles[cardId] || {};
+    const mfStylesObj = st.multiFitStyles || {};
+
+    const diDec = st.diDecimals != null ? st.diDecimals : 4;
+    const fmt = (v, dec = 4) => typeof v === 'number' ? (Number.isInteger(v) ? v.toString() : v.toFixed(dec)) : v;
 
     const buildEqHtml = (model, params, color) => {
       const mn = (model || '').toLowerCase();
       let fitted = '';
       if (mn === 'exponential') {
-        fitted = `q(t) = ${fmt(params.qi)} &middot; e<sup>&minus;${fmt(params.di)}&middot;t</sup>`;
+        fitted = `q(t) = ${fmt(params.qi)} &middot; e<sup>&minus;${fmt(params.di, diDec)}&middot;t</sup>`;
       } else if (mn === 'hyperbolic') {
-        fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.b)}&middot;${fmt(params.di)}&middot;t)<sup>1/${fmt(params.b)}</sup>`;
+        fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.b)}&middot;${fmt(params.di, diDec)}&middot;t)<sup>1/${fmt(params.b)}</sup>`;
       } else if (mn === 'harmonic') {
-        fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.di)}&middot;t)`;
+        fitted = `q(t) = ${fmt(params.qi)} / (1 + ${fmt(params.di, diDec)}&middot;t)`;
       }
       return fitted ? `<span class="formula-fitted" style="color:${color}">${fitted}</span>` : '';
     };
 
     let formulaHtml = '';
-    const multiFits = cardMultiFits[cardId] || [];
-    const st = cardStyles[cardId] || {};
-    const mfStylesObj = st.multiFitStyles || {};
 
     /* Main fit equation */
     if (firstW.equation && firstW.params) {
@@ -4794,30 +4799,46 @@ function renderSingleChart(cardId, data, forecastMonths) {
       }
 
       if (w.y_fitted || hasForecast) {
+        let fittedPoints = [], forecastPoints = [];
+        const lastIdx = w.x.map((_, i) => i).filter(i => !excluded.has(i)).pop();
+        const splitIdx = (lastIdx !== undefined) ? lastIdx : -1;
 
-        /* Build combined fitted + forecast data as a single series */
-        let combinedData = [];
         if (w.y_fitted) {
-          combinedData = w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]]).filter(p => p[1] != null);
+          w.x.forEach((xv, i) => {
+            if (w.y_fitted[i] == null) return;
+            const pt = [parseDateStr(xv), w.y_fitted[i]];
+            if (i <= splitIdx) {
+              fittedPoints.push(pt);
+              if (i === splitIdx) forecastPoints.push(pt);
+            } else {
+              forecastPoints.push(pt);
+            }
+          });
         }
         if (hasForecast) {
-          /* Append forecast points (bridge is automatic since fitted ends where forecast begins) */
-          w.forecast.x.forEach((xv, i) => combinedData.push([parseDateStr(xv), w.forecast.y[i]]));
+          w.forecast.x.forEach((xv, i) => {
+            forecastPoints.push([parseDateStr(xv), w.forecast.y[i]]);
+          });
         }
 
-        series.push({
-          name: prefix + 'Fitted',
-          type: 'line',
-          showSymbol: wFittedMarkers,
-          symbol: wFittedSymbol,
-          symbolSize: wFittedSymbolSize,
-          smooth: false,
-          lineStyle: { color: wFitColor, width: wFittedWidth, type: wFittedStyle },
-          itemStyle: { color: wFitColor },
-          label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
-          data: combinedData
-        });
-
+        if (fittedPoints.length > 0) {
+          series.push({
+            name: prefix + 'Fitted', type: 'line',
+            showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'solid' },
+            itemStyle: { color: wFitColor },
+            label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+            data: fittedPoints
+          });
+        }
+        if (forecastPoints.length > 0) {
+          series.push({
+            name: '_' + prefix + 'Forecast', type: 'line',
+            showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'dashed' },
+            itemStyle: { color: wFitColor }, data: forecastPoints
+          });
+        }
       }
 
     } else {
@@ -4865,27 +4886,46 @@ function renderSingleChart(cardId, data, forecastMonths) {
       }
 
       if (w.y_fitted || hasForecast) {
-        /* Build combined fitted + forecast data as a single series */
-        let combinedData = [];
+        let fittedPoints = [], forecastPoints = [];
+        const lastIdx = w.x.map((_, i) => i).filter(i => !excluded.has(i)).pop();
+        const splitIdx = (lastIdx !== undefined) ? lastIdx : -1;
+
         if (w.y_fitted) {
-          combinedData = w.x.map((xv, i) => [xv, w.y_fitted[i]]).filter(p => p[1] != null);
+          w.x.forEach((xv, i) => {
+            if (w.y_fitted[i] == null) return;
+            const pt = [xv, w.y_fitted[i]];
+            if (i <= splitIdx) {
+              fittedPoints.push(pt);
+              if (i === splitIdx) forecastPoints.push(pt);
+            } else {
+              forecastPoints.push(pt);
+            }
+          });
         }
         if (hasForecast) {
-          w.forecast.x.forEach((xv, i) => combinedData.push([xv, w.forecast.y[i]]));
+          w.forecast.x.forEach((xv, i) => {
+            forecastPoints.push([xv, w.forecast.y[i]]);
+          });
         }
 
-        series.push({
-          name: prefix + 'Fitted',
-          type: 'line',
-          showSymbol: wFittedMarkers,
-          symbol: wFittedSymbol,
-          symbolSize: wFittedSymbolSize,
-          smooth: false,
-          lineStyle: { color: wFitColor, width: wFittedWidth, type: wFittedStyle },
-          itemStyle: { color: wFitColor },
-          label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
-          data: combinedData
-        });
+        if (fittedPoints.length > 0) {
+          series.push({
+            name: prefix + 'Fitted', type: 'line',
+            showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'solid' },
+            itemStyle: { color: wFitColor },
+            label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+            data: fittedPoints
+          });
+        }
+        if (forecastPoints.length > 0) {
+          series.push({
+            name: '_' + prefix + 'Forecast', type: 'line',
+            showSymbol: wFittedMarkers, symbol: wFittedSymbol, symbolSize: wFittedSymbolSize,
+            smooth: false, lineStyle: { color: wFitColor, width: wFittedWidth, type: 'dashed' },
+            itemStyle: { color: wFitColor }, data: forecastPoints
+          });
+        }
       }
 
     }
@@ -5094,24 +5134,36 @@ function renderSingleChart(cardId, data, forecastMonths) {
         return pts;
       };
 
-      /* Combine fitted + dynamic forecast */
-      let mfCombined = [];
-      if (mf.fittedData && mf.fittedData.length > 0) mfCombined = [...mf.fittedData];
+      /* Combine fitted + dynamic forecast with dashed transition */
+      let mfFitted = [], mfForecast = [];
+      if (mf.fittedData && mf.fittedData.length > 0) {
+        mfFitted = [...mf.fittedData];
+        mfForecast.push(mfFitted[mfFitted.length - 1]);
+      }
       const dynForecast = buildMfForecast();
-      if (dynForecast.length > 0) mfCombined = mfCombined.concat(dynForecast);
-      if (mfCombined.length > 0) {
+      if (dynForecast.length > 0) mfForecast = mfForecast.concat(dynForecast);
+
+      if (mfFitted.length > 0) {
         series.push({
-          name: mfName,
-          type: 'line',
+          name: mfName, type: 'line',
+          showSymbol: ms.showMarkers != null ? ms.showMarkers : (st.fittedMarkers != null ? st.fittedMarkers : true),
+          symbol: ms.markerSymbol || st.fittedSymbol || 'triangle',
+          symbolSize: ms.markerSize != null ? ms.markerSize : (st.fittedSymbolSize != null ? st.fittedSymbolSize : 14),
+          smooth: false, lineStyle: { color: mfColor, width: mfLineWidth, type: 'solid' },
+          itemStyle: { color: mfColor },
+          label: (ms.showLabels != null ? ms.showLabels : st.fittedLabels) ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+          data: mfFitted, z: 5,
+        });
+      }
+      if (mfForecast.length > 1) {
+        series.push({
+          name: '_' + mfName + ' Forecast', type: 'line',
           showSymbol: ms.showMarkers != null ? ms.showMarkers : (st.fittedMarkers != null ? st.fittedMarkers : true),
           symbol: ms.markerSymbol || st.fittedSymbol || 'triangle',
           symbolSize: ms.markerSize != null ? ms.markerSize : (st.fittedSymbolSize != null ? st.fittedSymbolSize : 14),
           smooth: false,
-          lineStyle: { color: mfColor, width: mfLineWidth, type: mfLineStyle },
-          itemStyle: { color: mfColor },
-          label: (ms.showLabels != null ? ms.showLabels : st.fittedLabels) ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
-          data: mfCombined,
-          z: 5,
+          lineStyle: { color: mfColor, width: mfLineWidth, type: 'dashed' },
+          itemStyle: { color: mfColor }, data: mfForecast, z: 5,
         });
       }
 
@@ -5238,7 +5290,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
   const gridLeft = axPos.y === 'right' ? 30 : 80;
   const gridRight = axPos.y === 'right' ? 80 : 30;
   const gridTop = axPos.x === 'top' ? 70 : 50;
-  const gridBottom = axPos.x === 'top' ? (isDate ? 40 : 30) : (isDate ? 65 : 35);
+  const gridBottom = axPos.x === 'top' ? (isDate ? 80 : 70) : (isDate ? 100 : 70);
   const dzBottom = axPos.x === 'top' ? (isDate ? 8 : 4) : (isDate ? 8 : 4);
 
   const option = {
@@ -5280,7 +5332,14 @@ function renderSingleChart(cardId, data, forecastMonths) {
       }
     },
 
-    legend: { data: legendData, top: 4, left: 60, textStyle: { color: lbC, fontSize: 11 } },
+    legend: {
+      data: legendData,
+      bottom: isDate ? 45 : 10,
+      left: 'center',
+      textStyle: { color: lbC, fontSize: 11 },
+      padding: [5, 10],
+      type: 'scroll'
+    },
 
     grid: { left: gridLeft, right: gridRight, top: gridTop, bottom: gridBottom },
 
@@ -5530,7 +5589,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     const tableRows = [];
 
-    allWellsData.forEach(w => {
+    (data.wells || []).forEach(w => {
 
       const wExcl = new Set(w.excluded_indices || []);
 
@@ -5573,9 +5632,15 @@ function renderSingleChart(cardId, data, forecastMonths) {
     // Build multi-fit curve table data
     const mfDataMap = {};
     const mfList = cardMultiFits[cardId] || [];
+    const _fcMonths = parseFloat(forecastMonths) || 0;
+
     mfList.forEach(mf => {
       const mfRows = [];
-      const w0 = allWellsData[0];
+      const w0 = data.wells && data.wells.length > 0 ? data.wells[0] : allWellsData[0];
+      const mfTMax = mf.indices && mf.indices.length > 0 && w0 && w0.t
+        ? Math.max(...mf.indices.filter(i => i < w0.t.length).map(i => w0.t[i]))
+        : null;
+
       if (mf.fittedData && mf.fittedData.length > 0) {
         mf.fittedData.forEach(pt => {
           let xDisp = pt[0];
@@ -5584,15 +5649,46 @@ function renderSingleChart(cardId, data, forecastMonths) {
           mfRows.push({ well: w0 ? w0.well : '', section: 'Actual', time: isDate ? formatDateTs(pt[0]) : xDisp, actual: yActual, fitted: pt[1] != null ? pt[1] : null });
         });
       }
-      if (mf.forecastData && mf.forecastData.length > 0) {
-        const skipFirst = mf.fittedData && mf.fittedData.length > 0;
-        mf.forecastData.forEach((pt, fi) => {
-          if (skipFirst && fi === 0) return;
+
+      // Rebuild dynamic forecast for table consistency
+      let dynForecast = [];
+      if (_fcMonths && mf.params && mfTMax != null) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = w0 && w0.x ? (isDate ? parseDateStr(w0.x[0]) : 0) : 0;
+        const tOffset = w0 && w0.t ? (w0.t[0] || 0) : 0;
+        const x0 = w0 && w0.x ? (w0.x[0] || 0) : 0;
+        const nMonths = Math.round(_fcMonths);
+        for (let i = 1; i <= nMonths; i++) {
+          const tVal = mfTMax + 30.4375 * i;
+          const yVal = evalDeclineModel(mf.model, tVal, mf.params);
+          if (isDate) {
+            dynForecast.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+          } else {
+            dynForecast.push([tVal - tOffset + x0, yVal]);
+          }
+        }
+      }
+
+      // Check static forecast if dynamic is empty
+      if (dynForecast.length === 0 && mf.forecastData && mf.forecastData.length > 0) {
+        dynForecast = [...mf.forecastData];
+        // skip connection point
+        if (mf.fittedData && mf.fittedData.length > 0 && dynForecast.length > 0) dynForecast.shift();
+      }
+
+      if (dynForecast.length > 0) {
+        dynForecast.forEach(pt => {
           let xDisp = pt[0];
           if (typeof xDisp === 'number' && !Number.isInteger(xDisp)) xDisp = parseFloat(xDisp.toFixed(4));
           mfRows.push({ well: w0 ? w0.well : '', section: 'Forecast', time: isDate ? formatDateTs(pt[0]) : xDisp, actual: null, fitted: pt[1] != null ? pt[1] : null });
         });
       }
+
+      // Add safety fallback if data is completely empty (so chip isn't hidden)
+      if (mfRows.length === 0) {
+        mfRows.push({ well: w0 ? w0.well : '', section: 'Actual', time: '—', actual: null, fitted: null });
+      }
+
       mfDataMap['mf_' + mf.id] = mfRows;
     });
     cardTableMfData[cardId] = mfDataMap;
@@ -5689,17 +5785,20 @@ function renderCurveSummaryTable(cardId, data) {
     return Number(v).toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
   };
 
+  const st = cardStyles[cardId] || getDefaultStyles();
+  const diDecals = st.diDecimals != null ? st.diDecimals : 4;
+
   const buildFormula = (model, params, fallbackEquation) => {
     if (!params || !Number.isFinite(params.qi) || !Number.isFinite(params.di)) return fallbackEquation || '—';
     if (model === 'exponential') {
-      return 'q(t)=' + fmtShort(params.qi) + '*exp(-' + fmtShort(params.di, 6) + '*t)';
+      return 'q(t)=' + fmtShort(params.qi) + '*exp(-' + fmtShort(params.di, diDecals) + '*t)';
     }
     if (model === 'hyperbolic') {
       const b = Number.isFinite(params.b) ? params.b : 0.5;
-      return 'q(t)=' + fmtShort(params.qi) + '/(1+' + fmtShort(b) + '*' + fmtShort(params.di, 6) + '*t)^(1/' + fmtShort(b) + ')';
+      return 'q(t)=' + fmtShort(params.qi) + '/(1+' + fmtShort(b) + '*' + fmtShort(params.di, diDecals) + '*t)^(1/' + fmtShort(b) + ')';
     }
     if (model === 'harmonic') {
-      return 'q(t)=' + fmtShort(params.qi) + '/(1+' + fmtShort(params.di, 6) + '*t)';
+      return 'q(t)=' + fmtShort(params.qi) + '/(1+' + fmtShort(params.di, diDecals) + '*t)';
     }
     return fallbackEquation || '—';
   };
@@ -5740,6 +5839,7 @@ function renderCurveSummaryTable(cardId, data) {
       curve: prefix,
       model,
       formula: buildFormula(model, baseParams, w.equation),
+      r2: Number.isFinite(baseParams.r2) ? baseParams.r2 : null,
       qi: Number.isFinite(baseParams.qi) ? baseParams.qi : null,
       di: Number.isFinite(baseParams.di) ? baseParams.di : null,
       forecastPoints: forecastVals.length,
@@ -5767,6 +5867,7 @@ function renderCurveSummaryTable(cardId, data) {
             curve: wells.length === 1 ? 'P10' : (w.well + ' P10'),
             model,
             formula: buildFormula(model, p10Params, ''),
+            r2: null,
             qi: Number.isFinite(p10Params.qi) ? p10Params.qi : null,
             di: Number.isFinite(p10Params.di) ? p10Params.di : null,
             forecastPoints: p10FcVals.length,
@@ -5788,6 +5889,7 @@ function renderCurveSummaryTable(cardId, data) {
             curve: wells.length === 1 ? 'P90' : (w.well + ' P90'),
             model,
             formula: buildFormula(model, p90Params, ''),
+            r2: null,
             qi: Number.isFinite(p90Params.qi) ? p90Params.qi : null,
             di: Number.isFinite(p90Params.di) ? p90Params.di : null,
             forecastPoints: p90FcVals.length,
@@ -5818,6 +5920,7 @@ function renderCurveSummaryTable(cardId, data) {
       curve: 'Curve #' + mf.id,
       model: mf.model || '—',
       formula: buildFormula(mf.model, mf.params || {}, mf.equation || ''),
+      r2: mf.params && Number.isFinite(mf.params.r2) ? mf.params.r2 : null,
       qi: mf.params && Number.isFinite(mf.params.qi) ? mf.params.qi : null,
       di: mf.params && Number.isFinite(mf.params.di) ? mf.params.di : null,
       forecastPoints: forecastVals.length,
@@ -5850,6 +5953,7 @@ function renderCurveSummaryTable(cardId, data) {
             curve: 'Curve #' + mf.id + ' P10',
             model: mf.model || '—',
             formula: buildFormula(mf.model, { ...mf.params, di: mfPs.p10Di }, ''),
+            r2: null,
             qi: Number.isFinite(mf.params.qi) ? mf.params.qi : null,
             di: Number.isFinite(mfPs.p10Di) ? mfPs.p10Di : null,
             forecastPoints: 0,
@@ -5868,6 +5972,7 @@ function renderCurveSummaryTable(cardId, data) {
             curve: 'Curve #' + mf.id + ' P90',
             model: mf.model || '—',
             formula: buildFormula(mf.model, { ...mf.params, di: mfPs.p90Di }, ''),
+            r2: null,
             qi: Number.isFinite(mf.params.qi) ? mf.params.qi : null,
             di: Number.isFinite(mfPs.p90Di) ? mfPs.p90Di : null,
             forecastPoints: 0,
@@ -5893,8 +5998,9 @@ function renderCurveSummaryTable(cardId, data) {
       + '<td class="curve-summary-left">' + r.curve + '</td>'
       + '<td>' + r.model + '</td>'
       + '<td class="curve-summary-formula">' + (r.formula || '—') + '</td>'
+      + '<td>' + (r.r2 == null ? '—' : fmtNum(r.r2, 4)) + '</td>'
       + '<td>' + (r.qi == null ? '—' : fmtNum(r.qi, 4)) + '</td>'
-      + '<td>' + (r.di == null ? '—' : fmtNum(r.di, 6)) + '</td>'
+      + '<td>' + (r.di == null ? '—' : fmtNum(r.di, diDecals)) + '</td>'
       + '<td>' + r.forecastPoints + '</td>'
       + '<td>' + (fc ? fmtNum(fc.first, 2) : '—') + '</td>'
       + '<td>' + (fc ? fmtNum(fc.last, 2) : '—') + '</td>'
@@ -5912,6 +6018,7 @@ function renderCurveSummaryTable(cardId, data) {
     + '<th class="curve-summary-left">Curve</th>'
     + '<th>Model</th>'
     + '<th class="curve-summary-formula">Formula</th>'
+    + '<th>R²</th>'
     + '<th>Qi</th>'
     + '<th>Di</th>'
     + '<th>Fcst Pts</th>'
@@ -6531,13 +6638,10 @@ async function changeMultiFitModel(cardId, mfId, newModel) {
     }
     const fit = await res.json();
 
-    /* Rebuild fitted data */
-    const tMin = Math.min(...tFit), tMax = Math.max(...tFit);
+    /* Rebuild fitted data: evaluate fitted curve only at actual data point dates */
     const fittedData = [];
-    const nPts = Math.max(100, indices.length * 2);
-    const step = (tMax - tMin) / (nPts - 1);
-    for (let i = 0; i < nPts; i++) {
-      const tVal = tMin + step * i;
+    for (let i = 0; i < tFit.length; i++) {
+      const tVal = tFit[i];
       const yVal = evalDeclineModel(newModel, tVal, fit.params);
       if (isDate) {
         const MS_PER_DAY = 86400000;
@@ -12189,7 +12293,7 @@ function setupAnnotationDrag(cardId, myChart) {
   if (!zr) return;
   if (zr.__annDragCleanup) zr.__annDragCleanup();
 
-  let dragging = null; // { annIdx, startPx, moved }
+  let dragging = null; // { annIdx, startPx, moved, offsetPx }
   const SNAP_DIST = 20;
   const DRAG_THRESHOLD = 4;
 
@@ -12199,7 +12303,8 @@ function setupAnnotationDrag(cardId, myChart) {
     const opt = myChart.getOption();
     if (!opt || !opt.xAxis || !opt.yAxis) return -1;
     const xType = opt.xAxis[0].type;
-    let bestIdx = -1, bestDist = SNAP_DIST;
+    let bestIdx = -1, bestDist = 1e9;
+
     anns.forEach((ann, i) => {
       let coord;
       if (xType === 'category') {
@@ -12208,10 +12313,29 @@ function setupAnnotationDrag(cardId, myChart) {
         coord = myChart.convertToPixel('grid', [ann.x, ann.y]);
       }
       if (!coord) return;
-      const dx = px - coord[0];
-      const dy = py - (coord[1] - 15); // label sits ~15px above anchor
+
+      const fs = ann.fontSize || 12;
+      const textLen = (ann.text || "").length;
+      // Estimate label height/width
+      const labelHeight = fs + 12; // font + padding
+      const labelWidth = textLen * (fs * 0.6) + 16;
+
+      // The label is positioned 'top' with distance 15.
+      // So the center of the box is roughly (coord[1] - 15 - labelHeight/2)
+      const labelCenterY = coord[1] - 15 - (labelHeight / 2);
+      const labelCenterX = coord[0];
+
+      const dx = px - labelCenterX;
+      const dy = py - labelCenterY;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+
+      // Increase hit area based on font size
+      const hitRadius = Math.max(SNAP_DIST, labelHeight, labelWidth / 2);
+
+      if (dist < hitRadius && dist < bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
     });
     return bestIdx;
   }
@@ -12221,7 +12345,20 @@ function setupAnnotationDrag(cardId, myChart) {
     const px = e.offsetX, py = e.offsetY;
     const idx = findNearestAnnotation(px, py);
     if (idx < 0) return;
-    dragging = { annIdx: idx, startPx: { x: px, y: py }, moved: false };
+
+    const anns = cardAnnotations[cardId] || [];
+    const ann = anns[idx];
+    const opt = myChart.getOption();
+    const xType = opt.xAxis[0].type;
+    let coord;
+    if (xType === 'category') {
+      coord = myChart.convertToPixel({ seriesIndex: 0 }, [ann.x, ann.y]);
+    } else {
+      coord = myChart.convertToPixel('grid', [ann.x, ann.y]);
+    }
+    const offsetPx = coord ? { x: coord[0] - px, y: coord[1] - py } : { x: 0, y: 15 };
+
+    dragging = { annIdx: idx, startPx: { x: px, y: py }, moved: false, offsetPx: offsetPx };
     _annDragging = true;
     // Prevent the native mousedown from activating box selection
     if (e.event && e.event.stopPropagation) e.event.stopPropagation();
@@ -12244,10 +12381,13 @@ function setupAnnotationDrag(cardId, myChart) {
     const opt = myChart.getOption();
     const xType = opt.xAxis[0].type;
     let dataCoord;
+    const targetPxX = px + dragging.offsetPx.x;
+    const targetPxY = py + dragging.offsetPx.y;
+
     if (xType === 'category') {
-      dataCoord = myChart.convertFromPixel({ seriesIndex: 0 }, [px, py]);
+      dataCoord = myChart.convertFromPixel({ seriesIndex: 0 }, [targetPxX, targetPxY]);
     } else {
-      dataCoord = myChart.convertFromPixel('grid', [px, py]);
+      dataCoord = myChart.convertFromPixel('grid', [targetPxX, targetPxY]);
     }
     if (!dataCoord) return;
     ann.x = dataCoord[0];
@@ -12724,4 +12864,83 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }, 500);
 });
+
+
+/* --- Header Settings Popup --- */
+function showHeaderSettingsPopup(cardId, mx, my) {
+  const existing = document.querySelector('.header-settings-popup');
+  if (existing) existing.remove();
+
+  const st = cardStyles[cardId] || getDefaultStyles();
+  const popup = document.createElement('div');
+  popup.className = 'header-settings-popup';
+  popup.style.left = Math.min(window.innerWidth - 300, mx) + 'px';
+  popup.style.top = Math.min(window.innerHeight - 300, my) + 'px';
+
+  popup.innerHTML = `
+    <div class="header-settings-title">
+      Header Settings
+      <span class="header-settings-close" onclick="this.parentElement.parentElement.remove()">✕</span>
+    </div>
+    <div class="header-settings-row">
+      <span class="header-settings-label">Color</span>
+      <input type="color" class="hs-color header-settings-input" value="${st.headerColor || '#000000'}">
+    </div>
+    <div class="header-settings-row">
+      <span class="header-settings-label">Size (rem)</span>
+      <input type="range" class="hs-size" min="0.8" max="6.0" step="0.1" value="${st.headerFontSize || 2.1}">
+      <span class="header-settings-label hs-size-val">${st.headerFontSize || 2.1}</span>
+    </div>
+    <div class="header-settings-row">
+      <span class="header-settings-label">Align</span>
+      <select class="hs-align header-settings-input">
+        <option value="left" ${st.headerTextAlign === 'left' ? 'selected' : ''}>Left</option>
+        <option value="center" ${st.headerTextAlign === 'center' || !st.headerTextAlign ? 'selected' : ''}>Center</option>
+        <option value="right" ${st.headerTextAlign === 'right' ? 'selected' : ''}>Right</option>
+      </select>
+    </div>
+    <div class="header-settings-row">
+      <span class="header-settings-label">Bold</span>
+      <input type="checkbox" class="hs-bold" ${st.headerFontWeight === 'bold' ? 'checked' : ''}>
+    </div>
+    <button class="btn" style="padding: 6px; font-size: 0.75rem; margin-top:4px;" onclick="this.parentElement.remove()">Done</button>
+  `;
+
+  document.body.appendChild(popup);
+
+  const update = () => {
+    st.headerColor = popup.querySelector('.hs-color').value;
+    st.headerFontSize = parseFloat(popup.querySelector('.hs-size').value);
+    st.headerTextAlign = popup.querySelector('.hs-align').value;
+    st.headerFontWeight = popup.querySelector('.hs-bold').checked ? 'bold' : 'normal';
+
+    popup.querySelector('.hs-size-val').textContent = st.headerFontSize;
+
+    cardStyles[cardId] = st;
+    const cardEl = document.getElementById(cardId);
+    if (cardEl) {
+      const headerEl = cardEl._headerInput || cardEl.querySelector('.p-header');
+      if (headerEl) {
+        headerEl.style.color = st.headerColor;
+        headerEl.style.fontSize = st.headerFontSize + 'rem';
+        headerEl.style.textAlign = st.headerTextAlign;
+        headerEl.style.fontWeight = st.headerFontWeight;
+      }
+    }
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+  };
+
+  popup.querySelectorAll('input, select').forEach(el => {
+    el.addEventListener('input', update);
+  });
+
+  // Close when clicking outside
+  const onClickOutside = (e) => {
+    if (!popup.contains(e.target)) {
+      popup.remove();
+      document.removeEventListener('mousedown', onClickOutside);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', onClickOutside), 10);
+}
 

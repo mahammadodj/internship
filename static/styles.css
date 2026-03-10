@@ -1152,8 +1152,9 @@ button.btn-sm {
   color: var(--accent);
   margin-bottom: 2px;
 }
-  color: var(--text-muted);
-  text-transform: uppercase;
+
+color: var(--text-muted);
+text-transform: uppercase;
 }
 
 .style-controls-group {
@@ -1560,6 +1561,87 @@ button.btn-sm {
   opacity: 0.6;
 }
 
+/* --- Header Settings Popup --- */
+.header-settings-popup {
+  position: fixed;
+  z-index: 10000;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: popIn .2s ease-out;
+}
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.header-settings-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-settings-close {
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.header-settings-close:hover {
+  opacity: 1;
+}
+
+.header-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.header-settings-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.header-settings-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.header-settings-popup input[type="range"] {
+  flex: 1;
+}
+
+.header-settings-popup select {
+  min-width: 100px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+
 /* --- DCA Stats Summary --- */
 .dca-stats-summary {
   display: block;
@@ -1786,6 +1868,7 @@ button.btn-sm {
   gap: 8px;
   flex-wrap: wrap;
 }
+
 .dt-curve-chips {
   display: flex;
   align-items: center;
@@ -1793,6 +1876,7 @@ button.btn-sm {
   flex-wrap: wrap;
   flex: 1;
 }
+
 .dt-curve-chip {
   display: inline-flex;
   align-items: center;
@@ -1808,14 +1892,17 @@ button.btn-sm {
   transition: all .15s;
   white-space: nowrap;
 }
+
 .dt-curve-chip:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
+
 .dt-curve-chip.active {
   background: var(--accent-bg);
   font-weight: 600;
 }
+
 .dt-chip-dot {
   display: inline-block;
   width: 8px;
@@ -1823,6 +1910,7 @@ button.btn-sm {
   border-radius: 50%;
   flex-shrink: 0;
 }
+
 .dt-side-toggle {
   display: inline-flex;
   align-items: center;
@@ -1833,23 +1921,28 @@ button.btn-sm {
   white-space: nowrap;
   user-select: none;
 }
+
 .dt-side-toggle input[type="checkbox"] {
   accent-color: var(--accent);
   margin: 0;
   cursor: pointer;
 }
+
 .dt-tables-container {
   display: block;
 }
+
 .dt-tables-container.dt-side-by-side {
   display: flex;
   gap: 12px;
   overflow-x: auto;
 }
+
 .dt-table-panel {
   flex: 1;
   min-width: 280px;
 }
+
 .dt-table-panel-header {
   display: flex;
   align-items: center;
@@ -1862,6 +1955,7 @@ button.btn-sm {
   background: var(--bg-input);
   border-radius: 4px;
 }
+
 .dt-panel-count {
   font-weight: 400;
   font-size: .68rem;

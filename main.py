@@ -380,10 +380,40 @@ def _fit_decline(t: np.ndarray, q: np.ndarray, model_name: str):
 
     def safe_float(v):
         if np.isfinite(v):
-            return round(float(v), 6)
+            return round(float(v), 12)
         return 0.0
 
-    return {name: safe_float(val) for name, val in zip(param_names, popt)}
+    result = {name: safe_float(val) for name, val in zip(param_names, popt)}
+    
+    try:
+        y_pred = func(t, *popt)
+        ss_res = np.sum((q - y_pred) ** 2)
+        ss_tot = np.sum((q - np.mean(q)) ** 2)
+        
+        # For nearly flat horizontal lines with tiny variance (std < 2% of mean), 
+        # standard centered R^2 naturally drives to 0.0 even on perfect fits.
+        # Fall back to uncentered R^2 calculation for highly flat clustered data.
+        mean_q = float(np.mean(q))
+        if mean_q > 0 and (np.var(q) / (mean_q ** 2)) < 4e-4:
+            ss_tot_unc = np.sum(q ** 2)
+            if ss_tot_unc > 1e-12:
+                result["r2"] = max(0.0, safe_float(1 - (ss_res / ss_tot_unc)))
+            else:
+                result["r2"] = 0.0
+        else:
+            if ss_tot > 1e-12:
+                r2_val = 1 - (ss_res / ss_tot)
+                result["r2"] = max(0.0, safe_float(r2_val))
+            else:
+                if ss_res <= 1e-12:
+                    result["r2"] = 1.0
+                else:
+                    result["r2"] = 0.0
+
+    except Exception:
+        result["r2"] = 0.0
+
+    return result
 
 
 # ---------------------------------------------------------------------------
