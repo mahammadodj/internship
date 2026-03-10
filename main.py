@@ -739,6 +739,7 @@ async def decline_curve_analysis(
     exclude_indices: str = Query("", description="Comma-separated indices to exclude from fitting"),
     combine: bool = Query(False, description="If true, sum y-values of selected wells by time period"),
     combine_func: str = Query("sum", description="Combine aggregation: sum|mean|median|min|max"),
+    group_col: str = Query("", description="Optional grouping column. When set, each 'well' value is a group value from this column; rows matching the group value are aggregated by x."),
 ):
     """
     Perform Decline Curve Analysis.
@@ -754,6 +755,11 @@ async def decline_curve_analysis(
     for col in [x, y, well_col]:
         if col not in _current_df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{col}' not found.")
+
+    # Validate optional group column
+    group_col_name = (group_col or "").strip()
+    if group_col_name and group_col_name not in _current_df.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{group_col_name}' not found.")
 
     well_list = [w.strip() for w in wells.split(",") if w.strip()]
 
@@ -798,6 +804,13 @@ async def decline_curve_analysis(
     for well_name in well_list:
         if _combined_override is not None:
             subset = _combined_override.copy()
+        elif group_col_name:
+            # Group-by mode: filter rows where group_col matches the selected value,
+            # then aggregate y by x using the chosen aggregation function.
+            mask = _current_df[group_col_name].astype(str) == well_name
+            grp = _current_df.loc[mask, [x, y]].dropna().copy()
+            grp[y] = pd.to_numeric(grp[y], errors='coerce').fillna(0.0)
+            subset = grp.groupby(x, sort=True)[y].agg(agg_func).reset_index()
         else:
             mask = _current_df[well_col].astype(str) == well_name
             subset = _current_df.loc[mask, [x, y]].dropna().copy()

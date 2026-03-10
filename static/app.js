@@ -124,6 +124,9 @@ const cardPCurveState = {};  // { enabled, p10Di, p90Di } — decline rates per 
 
 const cardUserLines = {};    // { cardId: [{id, type:'h'|'v', value, color, name}] }
 const cardAnnotations = {};  // { cardId: [{id, x, y, xLabel, text, fontSize}] }
+let _annDragSuppressClick = false; // suppress annotation click after drag
+let _annDragging = false;          // true while annotation drag is in progress
+let _curveDragging = false;        // true while any curve/line drag is in progress
 const cardValueLabels = {};  // { cardId: 'none'|'top'|'bottom'|'left'|'right' }
 const cardLogScale = {};     // { cardId: boolean }
 const cardLogScaleX = {};    // { cardId: boolean }  – X-axis log scale
@@ -1573,17 +1576,19 @@ const container = document.getElementById('plotsContainer');
 
 
 
-function populateCardColumnSelectors(cardId, presetX, presetY, presetWellCol) {
+function populateCardColumnSelectors(cardId, presetX, presetY, presetWellCol, presetGroupCol) {
   const card = document.getElementById(cardId);
   if (!card) return;
   const selX = card.querySelector('.p-selX');
   const selY = card.querySelector('.p-selY');
   const selWellCol = card.querySelector('.p-selWellCol');
+  const selGroupCol = card.querySelector('.p-groupCol');
   if (!selX || !selY || !selWellCol) return;
 
   selX.innerHTML = '<option value="">— select —</option>';
   selY.innerHTML = '<option value="">— select —</option>';
   selWellCol.innerHTML = '<option value="">— select —</option>';
+  if (selGroupCol) selGroupCol.innerHTML = '<option value="">— none —</option>';
 
   // X: all columns (numeric first, then categorical)
   [...numericColumns, ...uploadedColumns.filter(c => !numericColumns.includes(c))].forEach(c => {
@@ -1598,10 +1603,17 @@ function populateCardColumnSelectors(cardId, presetX, presetY, presetWellCol) {
   [...catCols, ...numericColumns].forEach(c => {
     selWellCol.innerHTML += `<option value="${c}">${c}</option>`;
   });
+  // Group By: all columns (categorical first)
+  if (selGroupCol) {
+    [...catCols, ...numericColumns].forEach(c => {
+      selGroupCol.innerHTML += `<option value="${c}">${c}</option>`;
+    });
+  }
 
   if (presetX) selX.value = presetX;
   if (presetY) selY.value = presetY;
   if (presetWellCol) selWellCol.value = presetWellCol;
+  if (presetGroupCol && selGroupCol) selGroupCol.value = presetGroupCol;
 }
 
 // Re-populate column selectors on all existing cards (after new data upload)
@@ -1610,7 +1622,8 @@ function populateAllCardColumnSelectors() {
     const curX = card.querySelector('.p-selX')?.value || '';
     const curY = card.querySelector('.p-selY')?.value || '';
     const curW = card.querySelector('.p-selWellCol')?.value || '';
-    populateCardColumnSelectors(card.id, curX, curY, curW);
+    const curG = card.querySelector('.p-groupCol')?.value || '';
+    populateCardColumnSelectors(card.id, curX, curY, curW, curG);
   });
 }
 
@@ -1634,7 +1647,7 @@ function addPlotCardToActive() {
 
 
 
-function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, presetCombine, presetHeader, presetCombineAgg, presetSelX, presetSelY, presetSelWellCol) {
+function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, presetCombine, presetHeader, presetCombineAgg, presetSelX, presetSelY, presetSelWellCol, presetGroupCol) {
 
   const cardId = 'card-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
 
@@ -1678,6 +1691,9 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       </div>
       <div class="control-group"><label>Well Column</label>
         <select class="p-selWellCol"><option value="">— select —</option></select>
+      </div>
+      <div class="control-group"><label>Group By</label>
+        <select class="p-groupCol"><option value="">— none —</option></select>
       </div>
 
       <div class="control-group"><label>Well(s)</label>
@@ -1747,25 +1763,45 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
     </div>
 
     <div class="style-panel" id="style-${cardId}">
-      <div class="style-curves-container" id="styleCurves-${cardId}"></div>
+      <div class="style-curves-container" id="styleCurves-${cardId}">
+        <div class="style-section-title" style="margin-bottom: 12px; font-size: 0.75rem;">Curve Styles</div>
+      </div>
       <div class="style-section">
         <div class="style-section-title">Layout</div>
         <div class="style-row">
-          <span class="style-label">Gridlines</span>
-          <label class="style-check"><input type="checkbox" class="s-grid-x" checked> Horizontal</label>
-          <label class="style-check"><input type="checkbox" class="s-grid-y" checked> Vertical</label>
+          <span class="style-label">Actual Pts</span>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="color" class="s-actual-color" value="#3b82f6" title="Color">
+            <select class="s-actual-symbol" style="flex:1;">
+              <option value="circle">● Circle</option>
+              <option value="diamond">◆ Diamond</option>
+              <option value="rect">■ Square</option>
+              <option value="triangle" selected>▲ Triangle</option>
+            </select>
+            <input type="range" class="s-actual-size" min="2" max="20" value="14" title="Size" style="width:60px;">
+            <span class="s-actual-size-val style-range-val">14</span>
+          </div>
         </div>
         <div class="style-row">
-          <span class="style-label">Section Header</span>
-          <input type="color" class="s-header-color" value="#e2e8f0" title="Color">
-          <input type="range" class="s-header-fsize" min="0.8" max="4.0" step="0.1" value="1.8" title="Size">
-          <span class="s-header-fsize-val style-range-val">1.8</span>
-          <label class="style-check"><input type="checkbox" class="s-header-bold"> Bold</label>
-          <select class="s-header-align">
-            <option value="left">Left</option>
-            <option value="center">Center</option>
-            <option value="right">Right</option>
-          </select>
+          <span class="style-label">Gridlines</span>
+          <div style="display:flex; gap:12px;">
+            <label class="style-check"><input type="checkbox" class="s-grid-x" checked> Horizontal</label>
+            <label class="style-check"><input type="checkbox" class="s-grid-y" checked> Vertical</label>
+          </div>
+        </div>
+        <div class="style-row">
+          <span class="style-label">Header</span>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="color" class="s-header-color" value="#e2e8f0" title="Color">
+            <input type="range" class="s-header-fsize" min="0.8" max="4.0" step="0.1" value="1.8" title="Size" style="width:60px;">
+            <span class="s-header-fsize-val style-range-val">1.8</span>
+            <label class="style-check"><input type="checkbox" class="s-header-bold"> Bold</label>
+            <select class="s-header-align" style="flex:1; min-width:70px;">
+              <option value="left">Left</option>
+              <option value="center">Center</option>
+              <option value="right">Right</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
@@ -1774,9 +1810,9 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       <div class="chart-toolbar">
 
-        <button onclick="toggleStylePanel('${cardId}')" title="Customize Style">🎨 Style</button>
+        <button onclick="toggleStylePanel('${cardId}')" title="Customize Style"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg" style="margin-right:4px;"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path><path d="M5 3v4"></path><path d="M19 17v4"></path><path d="M3 5h4"></path><path d="M17 19h4"></path></svg>Style</button>
 
-        <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template">💾 Template</button>
+        <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg" style="margin-right:4px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>Template</button>
 
         <button onclick="downloadChart('${cardId}','png')" title="Download PNG">PNG</button>
 
@@ -1820,14 +1856,17 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       <div id="forecastTableSection-${cardId}" style="display:none;">
         <div class="data-table-toolbar">
           <div style="display:flex;align-items:center;justify-content:space-between;">
-            <span class="dt-title">📊 Data Table</span>
+            <span class="dt-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;"><path d="M3 3v18h18"/><path d="M7 16l3-4 3 2 4-6"/></svg> Data Table</span>
             <div style="display:flex;align-items:center;gap:6px;">
               <span class="dt-row-count" id="dtRowCount-${cardId}"></span>
               <button onclick="downloadTableCSV('${cardId}')" title="Download as CSV">↓ CSV</button>
             </div>
           </div>
           <div class="dt-filter-row">
-            <input class="dt-filter-input" type="text" placeholder="🔍 Filter well..." oninput="filterTable('${cardId}')" id="dtFilterWell-${cardId}">
+            <div style="position:relative; flex:1;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute; left:8px; top:50%; transform:translateY(-50%); color:var(--text-muted); pointer-events:none;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input class="dt-filter-input" type="text" placeholder="Filter well..." oninput="filterTable('${cardId}')" id="dtFilterWell-${cardId}" style="padding-left:26px;">
+            </div>
             <select class="dt-filter-select" onchange="filterTable('${cardId}')" id="dtFilterSection-${cardId}">
               <option value="">All sections</option>
               <option value="Actual">Actual</option>
@@ -1874,13 +1913,19 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
   rebuildCurveStyleSections(cardId);
 
   // ─── Populate per-card column selectors ───
-  populateCardColumnSelectors(cardId, presetSelX, presetSelY, presetSelWellCol);
+  populateCardColumnSelectors(cardId, presetSelX, presetSelY, presetSelWellCol, presetGroupCol);
 
   // Wire well-column change → fetch wells for this card
   const cardSelWellCol = card.querySelector('.p-selWellCol');
   if (cardSelWellCol) {
     cardSelWellCol.addEventListener('change', async () => {
       const wellCol = cardSelWellCol.value;
+      // If a Group By column is active, don't re-populate the well picker from well column
+      const groupCol = card.querySelector('.p-groupCol')?.value || '';
+      if (groupCol) {
+        if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+        return;
+      }
       if (!wellCol) {
         populateWellPicker(cardId, []);
         return;
@@ -1889,7 +1934,6 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
         const res = await fetch(`/api/wells?well_col=${encodeURIComponent(wellCol)}`);
         const data = await res.json();
         const wells = data.wells || [];
-        // Store wells on the card element for reference
         card._cardWells = wells;
         populateWellPicker(cardId, [], wells);
       } catch (e) {
@@ -1902,6 +1946,39 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
   if (cardSelX) cardSelX.addEventListener('change', () => { if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave(); });
   const cardSelY = card.querySelector('.p-selY');
   if (cardSelY) cardSelY.addEventListener('change', () => { if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave(); });
+
+  // Wire Group By change → re-populate well picker with group values
+  const cardGroupCol = card.querySelector('.p-groupCol');
+  if (cardGroupCol) {
+    cardGroupCol.addEventListener('change', async () => {
+      const groupCol = cardGroupCol.value;
+      if (!groupCol) {
+        // Reverted to "none" → reload wells from the well column
+        const wellCol = card.querySelector('.p-selWellCol')?.value || '';
+        if (wellCol) {
+          try {
+            const res = await fetch(`/api/wells?well_col=${encodeURIComponent(wellCol)}`);
+            const data = await res.json();
+            card._cardWells = data.wells || [];
+            populateWellPicker(cardId, [], card._cardWells);
+          } catch (e) { /* ignore */ }
+        } else {
+          populateWellPicker(cardId, []);
+        }
+      } else {
+        // Group By selected → populate well picker with unique values from group column
+        try {
+          const res = await fetch(`/api/wells?well_col=${encodeURIComponent(groupCol)}`);
+          const data = await res.json();
+          card._cardWells = data.wells || [];
+          populateWellPicker(cardId, [], card._cardWells);
+        } catch (e) {
+          console.warn('Failed to fetch group values for card', cardId, e);
+        }
+      }
+      if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+    });
+  }
 
   // Populate the custom well picker and set combine checkbox
 
@@ -2009,7 +2086,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 
 function getDefaultStyles() {
-  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'triangle', actualSize: 14, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
+  return { plotTheme: 'classic', actualColor: '#3b82f6', actualSymbol: 'triangle', actualSize: 14, fittedColor: '#f59e0b', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedLabels: false, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#22c55e', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p10Symbol: 'circle', p10SymbolSize: 6, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, p90Symbol: 'circle', p90SymbolSize: 6, gridX: true, gridY: true, headerFontSize: 1.8, headerColor: document.documentElement.getAttribute('data-theme') === 'light' ? '#0f172a' : '#e2e8f0', headerFontWeight: 'normal', headerTextAlign: 'left' };
 }
 
 /* Build per-curve style HTML sections inside the style panel.
@@ -2028,25 +2105,29 @@ function rebuildCurveStyleSections(cardId) {
   const mfStyles = stored.multiFitStyles || {};
   const palette = getPlotThemePalette(stored.plotTheme || 'classic');
   const multiFits = cardMultiFits[cardId] || [];
+  const plottedWellEntries = [];
 
   /* Helper: escape well name for use in data attribute */
   const esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;');
 
   const sel = (options, selected) => options.map(o => '<option value="' + o.v + '"' + (o.v === selected ? ' selected' : '') + '>' + o.l + '</option>').join('');
-  const symOpts = [{v:'circle',l:'● Circle'},{v:'diamond',l:'◆ Diamond'},{v:'rect',l:'■ Square'},{v:'triangle',l:'▲ Triangle'}];
-  const lineOpts = [{v:'solid',l:'Solid'},{v:'dashed',l:'Dashed'},{v:'dotted',l:'Dotted'}];
+  const symOpts = [{ v: 'circle', l: '● Circle' }, { v: 'diamond', l: '◆ Diamond' }, { v: 'rect', l: '■ Square' }, { v: 'triangle', l: '▲ Triangle' }];
+  const lineOpts = [{ v: 'solid', l: 'Solid' }, { v: 'dashed', l: 'Dashed' }, { v: 'dotted', l: 'Dotted' }];
   const chk = (v) => v ? ' checked' : '';
+
+  wells.forEach((w, idx) => {
+    const hasMainCurve = !!(
+      (w && Array.isArray(w.y_fitted) && w.y_fitted.some(v => v != null)) ||
+      (w && w.forecast && Array.isArray(w.forecast.x) && w.forecast.x.length > 0)
+    );
+    if (hasMainCurve) plottedWellEntries.push({ wellName: w.well || ('Well ' + (idx + 1)), idx: idx });
+  });
 
   /* Build list of all available curves for the selector */
   const curveList = []; /* { key, label, dotColor } */
-  const wellNames = [];
-  if (wells.length === 0) {
-    wellNames.push('default');
-  } else {
-    wells.forEach((w, idx) => wellNames.push(w.well || ('Well ' + (idx + 1))));
-  }
   const mainModel = data?.model || 'exponential';
-  wellNames.forEach((wn, idx) => {
+  plottedWellEntries.forEach(({ wellName, idx }) => {
+    const wn = wellName;
     const cs = curveStyles[wn] || {};
     const defColor = (!isSingle) ? (palette[idx % palette.length]) : (cs.fittedColor || stored.fittedColor || defaults.fittedColor);
     const dotColor = cs.fittedColor || defColor;
@@ -2071,7 +2152,7 @@ function rebuildCurveStyleSections(cardId) {
   if (curveList.length > 1) {
     html += '<div class="style-curve-selector"><select class="sc-curve-select">';
     curveList.forEach(c => {
-      html += '<option value="' + esc(c.key) + '"' + (c.key === activeKey ? ' selected' : '') + '>' + c.label + '</option>';
+      html += '<option value="' + esc(c.key) + '" data-color="' + esc(c.dotColor) + '" style="color:' + esc(c.dotColor) + '"' + (c.key === activeKey ? ' selected' : '') + '>' + c.label + '</option>';
     });
     html += '</select></div>';
   }
@@ -2080,35 +2161,29 @@ function rebuildCurveStyleSections(cardId) {
   const buildCurveSection = (wellName, wIdx) => {
     const cs = curveStyles[wellName] || {};
     const isMulti = !isSingle;
-    const defActualColor = isMulti ? (palette[wIdx % palette.length]) : (cs.actualColor || stored.actualColor || defaults.actualColor);
     const defFittedColor = isMulti ? (palette[wIdx % palette.length]) : (cs.fittedColor || stored.fittedColor || defaults.fittedColor);
-    const defForecastColor = isMulti ? (palette[wIdx % palette.length]) : (cs.forecastColor || stored.forecastColor || defaults.forecastColor);
-    const actualColor = cs.actualColor || defActualColor;
-    const actualSymbol = cs.actualSymbol || stored.actualSymbol || defaults.actualSymbol;
-    const actualSize = cs.actualSize != null ? cs.actualSize : (stored.actualSize != null ? stored.actualSize : defaults.actualSize);
     const fittedColor = cs.fittedColor || defFittedColor;
     const fittedStyle = cs.fittedStyle || stored.fittedStyle || defaults.fittedStyle;
     const fittedWidth = cs.fittedWidth != null ? cs.fittedWidth : (stored.fittedWidth != null ? stored.fittedWidth : defaults.fittedWidth);
     const fittedMarkers = cs.fittedMarkers != null ? cs.fittedMarkers : (stored.fittedMarkers != null ? stored.fittedMarkers : defaults.fittedMarkers);
+    const fittedLabels = cs.fittedLabels != null ? cs.fittedLabels : (stored.fittedLabels != null ? stored.fittedLabels : defaults.fittedLabels);
     const fittedSymbol = cs.fittedSymbol || stored.fittedSymbol || defaults.fittedSymbol;
     const fittedSymbolSize = cs.fittedSymbolSize != null ? cs.fittedSymbolSize : (stored.fittedSymbolSize != null ? stored.fittedSymbolSize : defaults.fittedSymbolSize);
-    const forecastColor = cs.forecastColor || defForecastColor;
-    const forecastStyle = cs.forecastStyle || stored.forecastStyle || defaults.forecastStyle;
-    const forecastWidth = cs.forecastWidth != null ? cs.forecastWidth : (stored.forecastWidth != null ? stored.forecastWidth : defaults.forecastWidth);
-    const forecastMarkers = cs.forecastMarkers != null ? cs.forecastMarkers : (stored.forecastMarkers != null ? stored.forecastMarkers : defaults.forecastMarkers);
-    const forecastLabels = cs.forecastLabels != null ? cs.forecastLabels : (stored.forecastLabels != null ? stored.forecastLabels : defaults.forecastLabels);
-    const forecastSymbol = cs.forecastSymbol || stored.forecastSymbol || defaults.forecastSymbol;
-    const forecastSymbolSize = cs.forecastSymbolSize != null ? cs.forecastSymbolSize : (stored.forecastSymbolSize != null ? stored.forecastSymbolSize : defaults.forecastSymbolSize);
     const p10Color = cs.p10Color || stored.p10Color || defaults.p10Color;
     const p10Line = cs.p10Line != null ? cs.p10Line : (stored.p10Line != null ? stored.p10Line : defaults.p10Line);
     const p10Marker = cs.p10Marker != null ? cs.p10Marker : (stored.p10Marker != null ? stored.p10Marker : defaults.p10Marker);
     const p10Labels = cs.p10Labels != null ? cs.p10Labels : (stored.p10Labels != null ? stored.p10Labels : defaults.p10Labels);
     const p10Style = cs.p10Style || stored.p10Style || defaults.p10Style;
+    const p10Symbol = cs.p10Symbol || stored.p10Symbol || defaults.p10Symbol;
+    const p10SymbolSize = cs.p10SymbolSize != null ? cs.p10SymbolSize : (stored.p10SymbolSize != null ? stored.p10SymbolSize : defaults.p10SymbolSize);
+
     const p90Color = cs.p90Color || stored.p90Color || defaults.p90Color;
     const p90Line = cs.p90Line != null ? cs.p90Line : (stored.p90Line != null ? stored.p90Line : defaults.p90Line);
     const p90Marker = cs.p90Marker != null ? cs.p90Marker : (stored.p90Marker != null ? stored.p90Marker : defaults.p90Marker);
     const p90Labels = cs.p90Labels != null ? cs.p90Labels : (stored.p90Labels != null ? stored.p90Labels : defaults.p90Labels);
     const p90Style = cs.p90Style || stored.p90Style || defaults.p90Style;
+    const p90Symbol = cs.p90Symbol || stored.p90Symbol || defaults.p90Symbol;
+    const p90SymbolSize = cs.p90SymbolSize != null ? cs.p90SymbolSize : (stored.p90SymbolSize != null ? stored.p90SymbolSize : defaults.p90SymbolSize);
 
     const sectionKey = 'well:' + wellName;
     const isActive = sectionKey === activeKey;
@@ -2118,148 +2193,121 @@ function rebuildCurveStyleSections(cardId) {
 
     html += '<div class="style-section style-curve-section" ' + dw + ' data-curve-key="' + esc(sectionKey) + '" data-series-name="' + esc(seriesName) + '"' + (isActive ? '' : ' style="display:none"') + '>';
 
-    /* Model selector */
-    const mainModelOpts = [{v:'exponential',l:'Exponential'},{v:'hyperbolic',l:'Hyperbolic'},{v:'harmonic',l:'Harmonic'}];
-    html += '<div class="style-row"><span class="style-label">Model</span>'
-      + '<select class="sc-main-model" ' + dw + '>' + sel(mainModelOpts, mainModel) + '</select>'
-      + '</div>';
-
-    /* Actual Points */
-    html += '<div class="style-row"><span class="style-label">Actual Pts</span>'
-      + '<input type="color" class="sc-actual-color" ' + dw + ' value="' + actualColor + '">'
-      + '<select class="sc-actual-symbol" ' + dw + '>' + sel(symOpts, actualSymbol) + '</select>'
-      + '<input type="range" class="sc-actual-size" ' + dw + ' min="2" max="20" value="' + actualSize + '" title="Size">'
-      + '<span class="style-range-val">' + actualSize + '</span>'
-      + '</div>';
-
-    /* Fitted Curve */
-    html += '<div class="style-row"><span class="style-label">Fitted Curve</span>'
+    /* Curve */
+    html += '<div class="style-row"><span class="style-label">Curve</span><div>'
       + '<input type="color" class="sc-fitted-color" ' + dw + ' value="' + fittedColor + '">'
       + '<select class="sc-fitted-style" ' + dw + '>' + sel(lineOpts, fittedStyle) + '</select>'
       + '<input type="range" class="sc-fitted-width" ' + dw + ' min="1" max="6" value="' + fittedWidth + '" title="Width">'
       + '<span class="style-range-val">' + fittedWidth + '</span>'
-      + '</div>';
+      + '</div></div>';
 
-    /* Fitted Markers */
-    html += '<div class="style-row"><span class="style-label">Fitted Markers</span>'
+    /* Markers */
+    html += '<div class="style-row"><span class="style-label">Markers</span><div>'
       + '<label class="style-check"><input type="checkbox" class="sc-fitted-markers" ' + dw + chk(fittedMarkers) + '> Show</label>'
+      + '<label class="style-check"><input type="checkbox" class="sc-fitted-labels" ' + dw + chk(fittedLabels) + '> Labels</label>'
       + '<select class="sc-fitted-symbol" ' + dw + '>' + sel(symOpts, fittedSymbol) + '</select>'
       + '<input type="range" class="sc-fitted-msize" ' + dw + ' min="2" max="25" value="' + fittedSymbolSize + '" title="Size">'
       + '<span class="style-range-val">' + fittedSymbolSize + '</span>'
-      + '</div>';
-
-    /* Forecast */
-    html += '<div class="style-row"><span class="style-label">Forecast</span>'
-      + '<input type="color" class="sc-forecast-color" ' + dw + ' value="' + forecastColor + '">'
-      + '<select class="sc-forecast-style" ' + dw + '>' + sel(lineOpts, forecastStyle) + '</select>'
-      + '<input type="range" class="sc-forecast-width" ' + dw + ' min="1" max="6" value="' + forecastWidth + '" title="Width">'
-      + '<span class="style-range-val">' + forecastWidth + '</span>'
-      + '</div>';
-
-    /* Forecast Markers */
-    html += '<div class="style-row"><span class="style-label">Fcst Markers</span>'
-      + '<label class="style-check"><input type="checkbox" class="sc-forecast-markers" ' + dw + chk(forecastMarkers) + '> Show</label>'
-      + '<label class="style-check"><input type="checkbox" class="sc-forecast-labels" ' + dw + chk(forecastLabels) + '> Labels</label>'
-      + '<select class="sc-forecast-symbol" ' + dw + '>' + sel(symOpts, forecastSymbol) + '</select>'
-      + '<input type="range" class="sc-forecast-msize" ' + dw + ' min="2" max="20" value="' + forecastSymbolSize + '" title="Size">'
-      + '<span class="style-range-val">' + forecastSymbolSize + '</span>'
-      + '</div>';
+      + '</div></div>';
 
     /* P10/P90 */
-    html += '<div class="style-row"><span class="style-label">P10 Curve</span>'
+    html += '<div class="style-row"><span class="style-label">P10 Curve</span><div>'
       + '<input type="color" class="sc-p10-color" ' + dw + ' value="' + p10Color + '">'
       + '<label class="style-check"><input type="checkbox" class="sc-p10-line" ' + dw + chk(p10Line) + '> Line</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-p10-marker" ' + dw + chk(p10Marker) + '> Markers</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-p10-labels" ' + dw + chk(p10Labels) + '> Labels</label>'
       + '<select class="sc-p10-style" ' + dw + '>' + sel(lineOpts, p10Style) + '</select>'
-      + '</div>';
+      + '<select class="sc-p10-symbol" ' + dw + '>' + sel(symOpts, p10Symbol) + '</select>'
+      + '<input type="range" class="sc-p10-msize" ' + dw + ' min="2" max="25" value="' + p10SymbolSize + '" title="Size">'
+      + '<span class="style-range-val">' + p10SymbolSize + '</span>'
+      + '</div></div>';
 
-    html += '<div class="style-row"><span class="style-label">P90 Curve</span>'
+    html += '<div class="style-row"><span class="style-label">P90 Curve</span><div>'
       + '<input type="color" class="sc-p90-color" ' + dw + ' value="' + p90Color + '">'
       + '<label class="style-check"><input type="checkbox" class="sc-p90-line" ' + dw + chk(p90Line) + '> Line</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-p90-marker" ' + dw + chk(p90Marker) + '> Markers</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-p90-labels" ' + dw + chk(p90Labels) + '> Labels</label>'
       + '<select class="sc-p90-style" ' + dw + '>' + sel(lineOpts, p90Style) + '</select>'
-      + '</div>';
+      + '<select class="sc-p90-symbol" ' + dw + '>' + sel(symOpts, p90Symbol) + '</select>'
+      + '<input type="range" class="sc-p90-msize" ' + dw + ' min="2" max="25" value="' + p90SymbolSize + '" title="Size">'
+      + '<span class="style-range-val">' + p90SymbolSize + '</span>'
+      + '</div></div>';
 
     html += '</div>'; /* close section */
   };
 
-  wellNames.forEach((wn, idx) => buildCurveSection(wn, idx));
+  plottedWellEntries.forEach(({ wellName, idx }) => buildCurveSection(wellName, idx));
 
   /* ---- Multi-fit curve style sections (with P10/P90) ---- */
   multiFits.forEach(mf => {
     const mfKey = 'mf_' + mf.id;
     const ms = mfStyles[mfKey] || {};
     const mfColor = ms.color || mf.color || '#8b5cf6';
-    const mfLineStyle = ms.lineStyle || 'solid';
-    const mfWidth = ms.lineWidth != null ? ms.lineWidth : 2.5;
+    const mfLineStyle = ms.lineStyle || stored.fittedStyle || defaults.fittedStyle;
+    const mfWidth = ms.lineWidth != null ? ms.lineWidth : (stored.fittedWidth != null ? stored.fittedWidth : defaults.fittedWidth);
     const mfP10Color = ms.p10Color || mfColor;
-    const mfP10Line = ms.p10Line != null ? ms.p10Line : true;
-    const mfP10Marker = ms.p10Marker || false;
-    const mfP10Labels = ms.p10Labels || false;
-    const mfP10Style = ms.p10Style || 'dotted';
+    const mfP10Line = ms.p10Line != null ? ms.p10Line : (stored.p10Line != null ? stored.p10Line : defaults.p10Line);
+    const mfP10Marker = ms.p10Marker != null ? ms.p10Marker : (stored.p10Marker != null ? stored.p10Marker : defaults.p10Marker);
+    const mfP10Labels = ms.p10Labels != null ? ms.p10Labels : (stored.p10Labels != null ? stored.p10Labels : defaults.p10Labels);
+    const mfP10Style = ms.p10Style || stored.p10Style || defaults.p10Style;
+    const mfP10Symbol = ms.p10Symbol || stored.p10Symbol || defaults.p10Symbol;
+    const mfP10SymbolSize = ms.p10SymbolSize != null ? ms.p10SymbolSize : (stored.p10SymbolSize != null ? stored.p10SymbolSize : defaults.p10SymbolSize);
+
     const mfP90Color = ms.p90Color || mfColor;
-    const mfP90Line = ms.p90Line != null ? ms.p90Line : true;
-    const mfP90Marker = ms.p90Marker || false;
-    const mfP90Labels = ms.p90Labels || false;
-    const mfP90Style = ms.p90Style || 'dotted';
+    const mfP90Line = ms.p90Line != null ? ms.p90Line : (stored.p90Line != null ? stored.p90Line : defaults.p90Line);
+    const mfP90Marker = ms.p90Marker != null ? ms.p90Marker : (stored.p90Marker != null ? stored.p90Marker : defaults.p90Marker);
+    const mfP90Labels = ms.p90Labels != null ? ms.p90Labels : (stored.p90Labels != null ? stored.p90Labels : defaults.p90Labels);
+    const mfP90Style = ms.p90Style || stored.p90Style || defaults.p90Style;
+    const mfP90Symbol = ms.p90Symbol || stored.p90Symbol || defaults.p90Symbol;
+    const mfP90SymbolSize = ms.p90SymbolSize != null ? ms.p90SymbolSize : (stored.p90SymbolSize != null ? stored.p90SymbolSize : defaults.p90SymbolSize);
     const mfSeriesName = 'Curve #' + mf.id + ' (' + mf.model + ')';
     const sectionKey = 'mf:' + mf.id;
     const isActive = sectionKey === activeKey;
 
     html += '<div class="style-section style-curve-section style-mf-section" data-mf-id="' + mf.id + '" data-curve-key="' + esc(sectionKey) + '" data-series-name="' + esc(mfSeriesName) + '"' + (isActive ? '' : ' style="display:none"') + '>';
 
-    /* Model selector */
-    const modelOpts2 = [{v:'exponential',l:'Exponential'},{v:'hyperbolic',l:'Hyperbolic'},{v:'harmonic',l:'Harmonic'}];
-    html += '<div class="style-row"><span class="style-label">Model</span>'
-      + '<select class="sc-mf-model" data-mf-id="' + mf.id + '">' + sel(modelOpts2, mf.model) + '</select>'
-      + '</div>';
-
-    html += '<div class="style-row"><span class="style-label">Color</span>'
+    html += '<div class="style-row"><span class="style-label">Curve</span><div>'
       + '<input type="color" class="sc-mf-color" data-mf-id="' + mf.id + '" value="' + mfColor + '">'
-      + '</div>';
-
-    html += '<div class="style-row"><span class="style-label">Line Style</span>'
       + '<select class="sc-mf-line-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfLineStyle) + '</select>'
       + '<input type="range" class="sc-mf-line-width" data-mf-id="' + mf.id + '" min="1" max="6" value="' + mfWidth + '" title="Width">'
       + '<span class="style-range-val">' + mfWidth + '</span>'
-      + '</div>';
+      + '</div></div>';
 
-    const mfMarkers = ms.showMarkers || false;
-    const mfMarkerSymbol = ms.markerSymbol || 'circle';
-    const mfMarkerSize = ms.markerSize != null ? ms.markerSize : 8;
-    const mfShowLabels = ms.showLabels || false;
-    html += '<div class="style-row"><span class="style-label">Markers</span>'
+    const mfMarkers = ms.showMarkers != null ? ms.showMarkers : (stored.fittedMarkers != null ? stored.fittedMarkers : defaults.fittedMarkers);
+    const mfMarkerSymbol = ms.markerSymbol || stored.fittedSymbol || defaults.fittedSymbol;
+    const mfMarkerSize = ms.markerSize != null ? ms.markerSize : (stored.fittedSymbolSize != null ? stored.fittedSymbolSize : defaults.fittedSymbolSize);
+    const mfShowLabels = ms.showLabels != null ? ms.showLabels : (stored.fittedLabels != null ? stored.fittedLabels : defaults.fittedLabels);
+    html += '<div class="style-row"><span class="style-label">Markers</span><div>'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-markers" data-mf-id="' + mf.id + '"' + chk(mfMarkers) + '> Show</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-labels" data-mf-id="' + mf.id + '"' + chk(mfShowLabels) + '> Labels</label>'
       + '<select class="sc-mf-symbol" data-mf-id="' + mf.id + '">' + sel(symOpts, mfMarkerSymbol) + '</select>'
       + '<input type="range" class="sc-mf-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfMarkerSize + '" title="Size">'
       + '<span class="style-range-val">' + mfMarkerSize + '</span>'
-      + '</div>';
-      + '<input type="color" class="sc-mf-color" data-mf-id="' + mf.id + '" value="' + mfColor + '">'
-      + '</div>';
+      + '</div></div>';
 
-    html += '<div class="style-row"><span class="style-label">Line Style</span>'
-      + '<select class="sc-mf-line-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfLineStyle) + '</select>'
-      + '<input type="range" class="sc-mf-line-width" data-mf-id="' + mf.id + '" min="1" max="6" value="' + mfWidth + '" title="Width">'
-      + '<span class="style-range-val">' + mfWidth + '</span>'
-      + '</div>';
-
-    html += '<div class="style-row"><span class="style-label">P10 Curve</span>'
+    html += '<div class="style-row"><span class="style-label">P10 Curve</span><div>'
       + '<input type="color" class="sc-mf-p10-color" data-mf-id="' + mf.id + '" value="' + mfP10Color + '">'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-p10-line" data-mf-id="' + mf.id + '"' + chk(mfP10Line) + '> Line</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-p10-marker" data-mf-id="' + mf.id + '"' + chk(mfP10Marker) + '> Markers</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-p10-labels" data-mf-id="' + mf.id + '"' + chk(mfP10Labels) + '> Labels</label>'
       + '<select class="sc-mf-p10-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfP10Style) + '</select>'
-      + '</div>';
+      + '<select class="sc-mf-p10-symbol" data-mf-id="' + mf.id + '">' + sel(symOpts, mfP10Symbol) + '</select>'
+      + '<input type="range" class="sc-mf-p10-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfP10SymbolSize + '" title="Size">'
+      + '<span class="style-range-val">' + mfP10SymbolSize + '</span>'
+      + '</div></div>';
 
-    html += '<div class="style-row"><span class="style-label">P90 Curve</span>'
+    html += '<div class="style-row"><span class="style-label">P90 Curve</span><div>'
       + '<input type="color" class="sc-mf-p90-color" data-mf-id="' + mf.id + '" value="' + mfP90Color + '">'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-p90-line" data-mf-id="' + mf.id + '"' + chk(mfP90Line) + '> Line</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-p90-marker" data-mf-id="' + mf.id + '"' + chk(mfP90Marker) + '> Markers</label>'
       + '<label class="style-check"><input type="checkbox" class="sc-mf-p90-labels" data-mf-id="' + mf.id + '"' + chk(mfP90Labels) + '> Labels</label>'
       + '<select class="sc-mf-p90-style" data-mf-id="' + mf.id + '">' + sel(lineOpts, mfP90Style) + '</select>'
+      + '<select class="sc-mf-p90-symbol" data-mf-id="' + mf.id + '">' + sel(symOpts, mfP90Symbol) + '</select>'
+      + '<input type="range" class="sc-mf-p90-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfP90SymbolSize + '" title="Size">'
+      + '<span class="style-range-val">' + mfP90SymbolSize + '</span>'
+      + '</div></div>';
+    + '<input type="range" class="sc-mf-p90-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfP90SymbolSize + '" title="Size">'
+      + '<span class="style-range-val">' + mfP90SymbolSize + '</span>'
       + '</div>';
 
     html += '</div>';
@@ -2270,12 +2318,18 @@ function rebuildCurveStyleSections(cardId) {
   /* ---- Wire up curve selector dropdown ---- */
   const selectEl = container.querySelector('.sc-curve-select');
   if (selectEl) {
+    const syncCurveSelectColor = () => {
+      const selectedOption = selectEl.options[selectEl.selectedIndex];
+      selectEl.style.color = selectedOption?.dataset?.color || 'var(--text)';
+    };
+    syncCurveSelectColor();
     selectEl.addEventListener('change', () => {
       const newKey = selectEl.value;
       cardActiveCurveStyle[cardId] = newKey;
       container.querySelectorAll('.style-curve-section').forEach(sec => {
         sec.style.display = sec.getAttribute('data-curve-key') === newKey ? '' : 'none';
       });
+      syncCurveSelectColor();
     });
   }
 
@@ -2374,7 +2428,11 @@ function highlightStyleSection(cardId, seriesName) {
 
   /* Update selector dropdown if present */
   const selectEl = container.querySelector('.sc-curve-select');
-  if (selectEl) selectEl.value = targetKey;
+  if (selectEl) {
+    selectEl.value = targetKey;
+    const selectedOption = selectEl.options[selectEl.selectedIndex];
+    selectEl.style.color = selectedOption?.dataset?.color || 'var(--text)';
+  }
 
   /* Flash highlight */
   const targetSection = container.querySelector('.style-curve-section[data-curve-key="' + targetKey + '"]');
@@ -2419,16 +2477,16 @@ function applyPlotThemePresetToCard(cardId, themeName) {
   const preset = PLOT_THEME_PRESETS[themeName];
   if (!card || !preset) return;
   const palette = preset.palette || [preset.actualColor];
+  const actualColorEl = card.querySelector('.s-actual-color');
+  if (actualColorEl) actualColorEl.value = preset.actualColor;
   const sections = card.querySelectorAll('.style-curve-section[data-well]');
   const isSingle = sections.length <= 1;
   sections.forEach((sec, idx) => {
     const color = isSingle ? preset.actualColor : palette[idx % palette.length];
     const q = (cls) => sec.querySelector('.' + cls);
-    if (q('sc-actual-color'))   q('sc-actual-color').value = color;
-    if (q('sc-fitted-color'))   q('sc-fitted-color').value = isSingle ? preset.fittedColor : color;
-    if (q('sc-forecast-color')) q('sc-forecast-color').value = isSingle ? preset.forecastColor : color;
-    if (q('sc-p10-color'))      q('sc-p10-color').value = preset.p10Color;
-    if (q('sc-p90-color'))      q('sc-p90-color').value = preset.p90Color;
+    if (q('sc-fitted-color')) q('sc-fitted-color').value = isSingle ? preset.fittedColor : color;
+    if (q('sc-p10-color')) q('sc-p10-color').value = preset.p10Color;
+    if (q('sc-p90-color')) q('sc-p90-color').value = preset.p90Color;
   });
 }
 
@@ -2440,6 +2498,10 @@ function readCardStyles(cardId) {
 
   if (!card) return getDefaultStyles();
 
+  const globalActualColor = card.querySelector('.s-actual-color')?.value || '#3b82f6';
+  const globalActualSymbol = card.querySelector('.s-actual-symbol')?.value || 'triangle';
+  const globalActualSize = parseInt(card.querySelector('.s-actual-size')?.value || '14');
+
   /* Read per-curve styles from dynamic sections */
   const curveStyles = {};
   const curveSections = card.querySelectorAll('.style-curve-section');
@@ -2448,32 +2510,37 @@ function readCardStyles(cardId) {
     if (!wellName) return;
     const q = (cls) => sec.querySelector('.' + cls);
     curveStyles[wellName] = {
-      actualColor: q('sc-actual-color')?.value || '#3b82f6',
-      actualSymbol: q('sc-actual-symbol')?.value || 'circle',
-      actualSize: parseInt(q('sc-actual-size')?.value || '10'),
+      actualColor: globalActualColor,
+      actualSymbol: globalActualSymbol,
+      actualSize: globalActualSize,
       fittedColor: q('sc-fitted-color')?.value || '#f59e0b',
       fittedStyle: q('sc-fitted-style')?.value || 'solid',
       fittedWidth: parseInt(q('sc-fitted-width')?.value || '2'),
       fittedMarkers: q('sc-fitted-markers')?.checked || false,
+      fittedLabels: q('sc-fitted-labels')?.checked || false,
       fittedSymbol: q('sc-fitted-symbol')?.value || 'triangle',
       fittedSymbolSize: parseInt(q('sc-fitted-msize')?.value || '14'),
-      forecastColor: q('sc-forecast-color')?.value || '#22c55e',
-      forecastStyle: q('sc-forecast-style')?.value || 'dashed',
-      forecastWidth: parseInt(q('sc-forecast-width')?.value || '3'),
-      forecastMarkers: q('sc-forecast-markers')?.checked || false,
-      forecastLabels: q('sc-forecast-labels')?.checked || false,
-      forecastSymbol: q('sc-forecast-symbol')?.value || 'triangle',
-      forecastSymbolSize: parseInt(q('sc-forecast-msize')?.value || '14'),
+      forecastColor: q('sc-fitted-color')?.value || '#f59e0b',
+      forecastStyle: q('sc-fitted-style')?.value || 'solid',
+      forecastWidth: parseInt(q('sc-fitted-width')?.value || '2'),
+      forecastMarkers: q('sc-fitted-markers')?.checked || false,
+      forecastLabels: q('sc-fitted-labels')?.checked || false,
+      forecastSymbol: q('sc-fitted-symbol')?.value || 'triangle',
+      forecastSymbolSize: parseInt(q('sc-fitted-msize')?.value || '14'),
       p10Color: q('sc-p10-color')?.value || '#22c55e',
       p10Line: q('sc-p10-line')?.checked !== false,
       p10Marker: q('sc-p10-marker')?.checked || false,
       p10Labels: q('sc-p10-labels')?.checked || false,
       p10Style: q('sc-p10-style')?.value || 'solid',
+      p10Symbol: q('sc-p10-symbol')?.value || 'circle',
+      p10SymbolSize: parseInt(q('sc-p10-msize')?.value || '6'),
       p90Color: q('sc-p90-color')?.value || '#ef4444',
       p90Line: q('sc-p90-line')?.checked !== false,
       p90Marker: q('sc-p90-marker')?.checked || false,
       p90Labels: q('sc-p90-labels')?.checked || false,
       p90Style: q('sc-p90-style')?.value || 'solid',
+      p90Symbol: q('sc-p90-symbol')?.value || 'circle',
+      p90SymbolSize: parseInt(q('sc-p90-msize')?.value || '6'),
     };
   });
 
@@ -2487,20 +2554,24 @@ function readCardStyles(cardId) {
       color: q('sc-mf-color')?.value || '#8b5cf6',
       lineStyle: q('sc-mf-line-style')?.value || 'solid',
       lineWidth: parseFloat(q('sc-mf-line-width')?.value || '2.5'),
-      showMarkers: q('sc-mf-markers')?.checked || false,
-      markerSymbol: q('sc-mf-symbol')?.value || 'circle',
-      markerSize: parseInt(q('sc-mf-msize')?.value || '8'),
+      showMarkers: q('sc-mf-markers')?.checked !== false,
+      markerSymbol: q('sc-mf-symbol')?.value || 'triangle',
+      markerSize: parseInt(q('sc-mf-msize')?.value || '14'),
       showLabels: q('sc-mf-labels')?.checked || false,
       p10Color: q('sc-mf-p10-color')?.value || '#8b5cf6',
       p10Line: q('sc-mf-p10-line')?.checked !== false,
       p10Marker: q('sc-mf-p10-marker')?.checked || false,
       p10Labels: q('sc-mf-p10-labels')?.checked || false,
       p10Style: q('sc-mf-p10-style')?.value || 'dotted',
+      p10Symbol: q('sc-mf-p10-symbol')?.value || 'circle',
+      p10SymbolSize: parseInt(q('sc-mf-p10-msize')?.value || '6'),
       p90Color: q('sc-mf-p90-color')?.value || '#8b5cf6',
       p90Line: q('sc-mf-p90-line')?.checked !== false,
       p90Marker: q('sc-mf-p90-marker')?.checked || false,
       p90Labels: q('sc-mf-p90-labels')?.checked || false,
       p90Style: q('sc-mf-p90-style')?.value || 'dotted',
+      p90Symbol: q('sc-mf-p90-symbol')?.value || 'circle',
+      p90SymbolSize: parseInt(q('sc-mf-p90-msize')?.value || '6'),
     };
   });
 
@@ -2513,13 +2584,14 @@ function readCardStyles(cardId) {
     curveStyles: curveStyles,
     multiFitStyles: multiFitStyles,
 
-    actualColor: first.actualColor || '#3b82f6',
-    actualSymbol: first.actualSymbol || 'circle',
-    actualSize: first.actualSize != null ? first.actualSize : 10,
+    actualColor: globalActualColor,
+    actualSymbol: globalActualSymbol,
+    actualSize: globalActualSize,
     fittedColor: first.fittedColor || '#f59e0b',
     fittedStyle: first.fittedStyle || 'solid',
     fittedWidth: first.fittedWidth != null ? first.fittedWidth : 2,
     fittedMarkers: first.fittedMarkers || false,
+    fittedLabels: first.fittedLabels || false,
     fittedSymbol: first.fittedSymbol || 'triangle',
     fittedSymbolSize: first.fittedSymbolSize != null ? first.fittedSymbolSize : 14,
     forecastColor: first.forecastColor || '#22c55e',
@@ -2534,11 +2606,15 @@ function readCardStyles(cardId) {
     p10Marker: first.p10Marker || false,
     p10Labels: first.p10Labels || false,
     p10Style: first.p10Style || 'solid',
+    p10Symbol: first.p10Symbol || 'circle',
+    p10SymbolSize: first.p10SymbolSize != null ? first.p10SymbolSize : 6,
     p90Color: first.p90Color || '#ef4444',
     p90Line: first.p90Line !== false,
     p90Marker: first.p90Marker || false,
     p90Labels: first.p90Labels || false,
     p90Style: first.p90Style || 'solid',
+    p90Symbol: first.p90Symbol || 'circle',
+    p90SymbolSize: first.p90SymbolSize != null ? first.p90SymbolSize : 6,
 
     gridX: card.querySelector('.s-grid-x')?.checked !== false,
 
@@ -2581,6 +2657,9 @@ function applyStylesToCard(cardId, styles) {
   };
 
   s('.s-plot-theme', merged.plotTheme || 'classic');
+  s('.s-actual-color', merged.actualColor || '#3b82f6');
+  s('.s-actual-symbol', merged.actualSymbol || 'triangle');
+  s('.s-actual-size', merged.actualSize != null ? merged.actualSize : 14);
 
   /* Store curveStyles and multiFitStyles so rebuildCurveStyleSections can pick them up */
   if (merged.curveStyles || merged.multiFitStyles) {
@@ -2677,6 +2756,7 @@ async function runSingleDCA(cardId) {
   const xVal = card.querySelector('.p-selX')?.value || '';
   const yVal = card.querySelector('.p-selY')?.value || '';
   const wellCol = card.querySelector('.p-selWellCol')?.value || '';
+  const groupCol = card.querySelector('.p-groupCol')?.value || '';
   if (!xVal || !yVal || !wellCol) { alert('Please select X Axis, Y Axis, and Well Column on this card.'); return; }
 
   const btn = card.querySelector('.btn');
@@ -2703,7 +2783,7 @@ async function runSingleDCA(cardId) {
 
   try {
 
-    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}&combine=${combine}&combine_func=${enc(combineAgg)}`;
+    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}&combine=${combine}&combine_func=${enc(combineAgg)}&group_col=${enc(groupCol)}`;
 
     const res = await fetch(url);
 
@@ -2860,6 +2940,7 @@ function openFullView(cardId) {
     if (isSingle) {
       fullChart.on('click', function (params) {
         if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
+          if (_annDragSuppressClick) return;
           const annId = parseInt(params.name.replace('ann_', ''));
           const anns = cardAnnotations[cardId] || [];
           const idx = anns.findIndex(a => a.id === annId);
@@ -2879,6 +2960,7 @@ function openFullView(cardId) {
     } else {
       fullChart.on('click', function (params) {
         if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
+          if (_annDragSuppressClick) return;
           const annId = parseInt(params.name.replace('ann_', ''));
           const anns = cardAnnotations[cardId] || [];
           const idx = anns.findIndex(a => a.id === annId);
@@ -2891,6 +2973,7 @@ function openFullView(cardId) {
     setupPCurveDragHandles(cardId, fullChart);
     setupQiDragHandle(cardId, fullChart);
     setupUserLineDrag(cardId, fullChart);
+    setupAnnotationDrag(cardId, fullChart);
     setupAxisDragHandles(cardId, fullChart);
     setupBoxSelection(cardId, fullChart, chartDiv);
     setupCtrlClickSelection(cardId, fullChart, chartDiv);
@@ -3174,7 +3257,7 @@ function setupPCurveDragHandles(cardId, myChart) {
   const data = cardLastData[cardId];
   if (!data || !data.wells || data.wells.length === 0) return;
   const w = data.wells[0];
-  if (!w.params || !w.t) return;
+  if (!w.t) return;
 
   const isDate = w.is_date || false;
   const zr = myChart.getZr();
@@ -3340,6 +3423,7 @@ function setupPCurveDragHandles(cardId, myChart) {
       const curvePxY = interpolateCurvePxY(hit.seriesIdx, px);
       dragOffsetY = curvePxY != null ? (py - curvePxY) : 0;
 
+      _curveDragging = true;
       myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
       e.event && e.event.preventDefault && e.event.preventDefault();
     }
@@ -3509,6 +3593,7 @@ function setupPCurveDragHandles(cardId, myChart) {
         renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
       }
       dragging = null;
+      _curveDragging = false;
       myChart.getDom().style.cursor = '';
     }
   }
@@ -3810,6 +3895,8 @@ function setupQiDragHandle(cardId, myChart) {
 
       dragging = true;
 
+      _curveDragging = true;
+
       myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
 
       e.event && e.event.preventDefault && e.event.preventDefault();
@@ -3942,6 +4029,8 @@ function setupQiDragHandle(cardId, myChart) {
     if (dragging) {
 
       dragging = false;
+
+      _curveDragging = false;
 
       myChart.getDom().style.cursor = '';
 
@@ -4638,6 +4727,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
     const wFittedStyle = cs.fittedStyle || st.fittedStyle;
     const wFittedWidth = cs.fittedWidth != null ? cs.fittedWidth : st.fittedWidth;
     const wFittedMarkers = cs.fittedMarkers != null ? cs.fittedMarkers : st.fittedMarkers;
+    const wFittedLabels = cs.fittedLabels != null ? cs.fittedLabels : st.fittedLabels;
     const wFittedSymbol = cs.fittedSymbol || st.fittedSymbol;
     const wFittedSymbolSize = cs.fittedSymbolSize != null ? cs.fittedSymbolSize : st.fittedSymbolSize;
 
@@ -4722,7 +4812,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { color: wFitColor, width: wFittedWidth, type: wFittedStyle },
           itemStyle: { color: wFitColor },
-          label: wFittedMarkers ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+          label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: combinedData
         });
 
@@ -4791,7 +4881,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
           smooth: false,
           lineStyle: { color: wFitColor, width: wFittedWidth, type: wFittedStyle },
           itemStyle: { color: wFitColor },
-          label: wFittedMarkers ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+          label: wFittedLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: combinedData
         });
       }
@@ -4818,12 +4908,17 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       const wP10Labels = cs.p10Labels != null ? cs.p10Labels : st.p10Labels;
       const wP10Style = cs.p10Style || st.p10Style || 'solid';
+      const wP10Symbol = cs.p10Symbol || st.p10Symbol || 'circle';
+      const wP10SymbolSize = cs.p10SymbolSize != null ? cs.p10SymbolSize : (st.p10SymbolSize != null ? st.p10SymbolSize : 6);
+
       const wP90Labels = cs.p90Labels != null ? cs.p90Labels : st.p90Labels;
       const wP90Style = cs.p90Style || st.p90Style || 'solid';
+      const wP90Symbol = cs.p90Symbol || st.p90Symbol || 'circle';
+      const wP90SymbolSize = cs.p90SymbolSize != null ? cs.p90SymbolSize : (st.p90SymbolSize != null ? st.p90SymbolSize : 6);
 
       series.push({
         id: 'p10|main',
-        name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
+        name: prefix + 'P10 (Di=' + p10DiRound + ')', type: 'line', z: 1, showSymbol: p10ShowMarker, symbol: wP10Symbol, symbolSize: wP10SymbolSize, smooth: false,
         lineStyle: { color: P10_COLOR, width: p10ShowLine ? 1.5 : 0, type: wP10Style }, itemStyle: { color: P10_COLOR },
         label: wP10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
         data: p10Data
@@ -4831,7 +4926,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       series.push({
         id: 'p90|main',
-        name: prefix + 'P90 (Di=' + p90DiRound + ')', type: 'line', z: 1, showSymbol: p90ShowMarker, symbol: 'circle', symbolSize: 6, smooth: false,
+        name: prefix + 'P90 (Di=' + p90DiRound + ')', type: 'line', z: 1, showSymbol: p90ShowMarker, symbol: wP90Symbol, symbolSize: wP90SymbolSize, smooth: false,
         lineStyle: { color: P90_COLOR, width: p90ShowLine ? 1.5 : 0, type: wP90Style }, itemStyle: { color: P90_COLOR },
         label: wP90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
         data: p90Data
@@ -4888,6 +4983,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
       return {
 
         name: 'ann_' + ann.id, coord: coord, symbol: 'circle', symbolSize: 1,
+
+        cursor: 'move',
 
         itemStyle: { color: 'transparent' },
 
@@ -5004,13 +5101,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
         series.push({
           name: mfName,
           type: 'line',
-          showSymbol: ms.showMarkers || false,
-          symbol: ms.markerSymbol || 'circle',
-          symbolSize: ms.markerSize != null ? ms.markerSize : 8,
+          showSymbol: ms.showMarkers != null ? ms.showMarkers : (st.fittedMarkers != null ? st.fittedMarkers : true),
+          symbol: ms.markerSymbol || st.fittedSymbol || 'triangle',
+          symbolSize: ms.markerSize != null ? ms.markerSize : (st.fittedSymbolSize != null ? st.fittedSymbolSize : 14),
           smooth: false,
           lineStyle: { color: mfColor, width: mfLineWidth, type: mfLineStyle },
           itemStyle: { color: mfColor },
-          label: ms.showLabels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+          label: (ms.showLabels != null ? ms.showLabels : st.fittedLabels) ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
           data: mfCombined,
           z: 5,
         });
@@ -5060,16 +5157,22 @@ function renderSingleChart(cardId, data, forecastMonths) {
           const mfP90Data = makeMultiFitPCurve(mfP90Di);
           const mfP10Color = ms.p10Color || mfColor;
           const mfP10Style = ms.p10Style || 'dotted';
+          const mfP10Symbol = ms.p10Symbol || st.p10Symbol || 'circle';
+          const mfP10SymbolSize = ms.p10SymbolSize != null ? ms.p10SymbolSize : (st.p10SymbolSize != null ? st.p10SymbolSize : 6);
+
           const mfP90Color = ms.p90Color || mfColor;
           const mfP90Style = ms.p90Style || 'dotted';
+          const mfP90Symbol = ms.p90Symbol || st.p90Symbol || 'circle';
+          const mfP90SymbolSize = ms.p90SymbolSize != null ? ms.p90SymbolSize : (st.p90SymbolSize != null ? st.p90SymbolSize : 6);
+
           if (mfP10Data.length > 0) {
             series.push({
               id: 'p10|mf_' + mf.id,
               name: mfName + ' P10',
-              type: 'line', z: 1, showSymbol: ms.p10Marker || false, symbol: 'circle', symbolSize: 6, smooth: false,
+              type: 'line', z: 1, showSymbol: ms.p10Marker != null ? ms.p10Marker : st.p10Marker, symbol: mfP10Symbol, symbolSize: mfP10SymbolSize, smooth: false,
               lineStyle: { color: mfP10Color, width: 1.5, type: mfP10Style },
               itemStyle: { color: mfP10Color, opacity: 0.6 },
-              label: ms.p10Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+              label: (ms.p10Labels != null ? ms.p10Labels : st.p10Labels) ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
               data: mfP10Data,
             });
           }
@@ -5077,10 +5180,10 @@ function renderSingleChart(cardId, data, forecastMonths) {
             series.push({
               id: 'p90|mf_' + mf.id,
               name: mfName + ' P90',
-              type: 'line', z: 1, showSymbol: ms.p90Marker || false, symbol: 'circle', symbolSize: 6, smooth: false,
+              type: 'line', z: 1, showSymbol: ms.p90Marker != null ? ms.p90Marker : st.p90Marker, symbol: mfP90Symbol, symbolSize: mfP90SymbolSize, smooth: false,
               lineStyle: { color: mfP90Color, width: 1.5, type: mfP90Style },
               itemStyle: { color: mfP90Color, opacity: 0.6 },
-              label: ms.p90Labels ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
+              label: (ms.p90Labels != null ? ms.p90Labels : st.p90Labels) ? { show: true, position: 'top', formatter: pointLabelFormatter, fontSize: 9, color: isLight ? '#475569' : '#e2e8f0' } : { show: false },
               data: mfP90Data,
             });
           }
@@ -5156,12 +5259,12 @@ function renderSingleChart(cardId, data, forecastMonths) {
       trigger: 'axis', axisPointer: { type: 'cross', lineStyle: { color: 'var(--text-dim, #999)', type: 'dashed' } }, formatter: function (params) {
         if (!Array.isArray(params)) params = params ? [params] : [];
         if (params.length === 0) return '';
-        
+
         let header = '';
         const firstParam = params[0];
         const xVal = Array.isArray(firstParam.data) ? firstParam.data[0] : firstParam.axisValue;
         header = isDate ? '<b>' + formatDateTs(xVal) + '</b>' : '<b>' + xVal + '</b>';
-        
+
         params.forEach(p => {
           if (p && !p.seriesName.endsWith('_bridge') && !p.seriesName.startsWith('_')) {
             let val = Array.isArray(p.data) ? p.data[1] : p.data;
@@ -5170,7 +5273,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
             }
           }
         });
-        
+
         return header;
       }
     },
@@ -5286,6 +5389,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
       if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
 
+        if (_annDragSuppressClick) return;
+
         const annId = parseInt(params.name.replace('ann_', ''));
 
         const anns = cardAnnotations[cardId] || [];
@@ -5343,6 +5448,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
     myChart.on('click', function (params) {
 
       if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
+
+        if (_annDragSuppressClick) return;
 
         const annId = parseInt(params.name.replace('ann_', ''));
 
@@ -5402,7 +5509,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   setupUserLineDrag(cardId, myChart);
 
-
+  /* Setup annotation dragging */
+  setupAnnotationDrag(cardId, myChart);
 
   /* Setup explicit axis panning */
 
@@ -5803,6 +5911,13 @@ function setupBoxSelection(cardId, chart, chartDiv) {
 
 
 document.addEventListener('mousemove', function (e) {
+
+  // If an annotation or curve drag is in progress, cancel any active box-selection
+  if ((_annDragging || _curveDragging) && _activeSelection) {
+    if (_activeSelection.overlay) _activeSelection.overlay.remove();
+    _activeSelection = null;
+    return;
+  }
 
   if (!_activeSelection) return;
 
@@ -6741,7 +6856,7 @@ function clearAllCurvesFromPanel(cardId) {
   /* Delete all multi-fit curves */
   delete cardMultiFits[cardId];
   delete cardPCurveState[cardId];
-  
+
   /* Perm-delete the main fitted curve */
   const lastData = cardLastData[cardId];
   if (lastData && lastData.wells) {
@@ -6918,6 +7033,7 @@ function _collectTemplateFromCard(cardId) {
     selX: card.querySelector('.p-selX')?.value || '',
     selY: card.querySelector('.p-selY')?.value || '',
     selWellCol: card.querySelector('.p-selWellCol')?.value || '',
+    groupCol: card.querySelector('.p-groupCol')?.value || '',
     model: model,
     forecastMonths: card.querySelector('.p-forecast')?.value || '0',
     title: card.querySelector('.p-title')?.value || '',
@@ -7000,7 +7116,8 @@ function applyTemplate(tplId) {
     tpl.combineAgg,
     tpl.selX,
     tpl.selY,
-    tpl.selWellCol
+    tpl.selWellCol,
+    tpl.groupCol
   );
 
   if (!cardId) return;
@@ -7241,6 +7358,9 @@ function reRenderChart(cardId) {
 document.addEventListener('contextmenu', function (e) {
   const chartDiv = e.target.closest('.mini-chart, .modal-full-view-chart');
   if (!chartDiv) return;
+
+  // Don't show context menu right after an annotation drag ended
+  if (_annDragSuppressClick) { e.preventDefault(); return; }
 
   e.preventDefault();
 
@@ -10004,11 +10124,13 @@ async function loadWorkspaceFromFile() {
         const cardSelX = cs.selX || state.selX || '';
         const cardSelY = cs.selY || state.selY || '';
         const cardSelWellCol = cs.selWellCol || state.selWellCol || '';
+        const cardGroupCol = cs.groupCol || '';
 
-        // Fetch wells for this card's well column
-        if (cardSelWellCol && serverHasData) {
+        // Fetch wells (or group values) for this card
+        const fetchCol = cardGroupCol || cardSelWellCol;
+        if (fetchCol && serverHasData) {
           try {
-            const res = await fetch(`/api/wells?well_col=${encodeURIComponent(cardSelWellCol)}`);
+            const res = await fetch(`/api/wells?well_col=${encodeURIComponent(fetchCol)}`);
             const data = await res.json();
             allWells = data.wells || [];
           } catch (e) { allWells = state.allWells || []; }
@@ -10016,7 +10138,7 @@ async function loadWorkspaceFromFile() {
           allWells = state.allWells || [];
         }
 
-        const newId = addPlotCard(cs.wells || cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, cs.header || '', cs.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol);
+        const newId = addPlotCard(cs.wells || cs.well, cs.model, cs.forecast, cs.title, cs.combine || false, cs.header || '', cs.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol, cardGroupCol);
 
         const cardEl = document.getElementById(newId);
         if (cardEl) cardEl.dataset.page = cs.pageId || cs.page || activePageId;
@@ -11671,6 +11793,7 @@ function setupUserLineDrag(cardId, myChart) {
     e.event && e.event.preventDefault && e.event.preventDefault();
 
     // Prevent ECharts tooltip/dataZoom from interfering
+    _curveDragging = true;
     myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'userLineDrag', userLineDragging: true });
 
     chartDiv.style.cursor = line.type === 'h' ? 'ns-resize' : 'ew-resize';
@@ -11784,6 +11907,8 @@ function setupUserLineDrag(cardId, myChart) {
 
     dragging = null;
 
+    _curveDragging = false;
+
     // Full re-render to finalize position and sync all state
     reRenderChart(cardId);
 
@@ -11816,6 +11941,133 @@ function setupUserLineDrag(cardId, myChart) {
 }
 
 
+/* ---- Annotation dragging ---- */
+
+function patchAnnotationMarkPoints(cardId, myChart) {
+  const anns = cardAnnotations[cardId] || [];
+  const opt = myChart.getOption();
+  if (!opt || !opt.series) return;
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const idx = opt.series.findIndex(s => s.name === '_annotations');
+  if (idx === -1) return;
+  const annotPoints = anns.map(ann => ({
+    name: 'ann_' + ann.id, coord: [ann.x, ann.y], symbol: 'circle', symbolSize: 1,
+    cursor: 'move',
+    itemStyle: { color: 'transparent' },
+    label: {
+      show: true, formatter: ann.text, position: 'top', fontSize: ann.fontSize || 12,
+      color: ann.color || (isLight ? '#0f172a' : '#f8fafc'),
+      backgroundColor: isLight ? 'rgba(255,255,255,.92)' : 'rgba(34,37,51,.92)',
+      borderColor: isLight ? '#cbd5e1' : '#444', borderWidth: 1,
+      padding: [4, 8], borderRadius: 4, distance: 15
+    }
+  }));
+  const newSeries = opt.series.map((s, i) => {
+    if (i !== idx) return s;
+    return Object.assign({}, s, { markPoint: { data: annotPoints, animation: false } });
+  });
+  myChart.setOption({ series: newSeries }, false);
+}
+
+function setupAnnotationDrag(cardId, myChart) {
+  const zr = myChart.getZr();
+  if (!zr) return;
+  if (zr.__annDragCleanup) zr.__annDragCleanup();
+
+  let dragging = null; // { annIdx, startPx, moved }
+  const SNAP_DIST = 20;
+  const DRAG_THRESHOLD = 4;
+
+  function findNearestAnnotation(px, py) {
+    const anns = cardAnnotations[cardId] || [];
+    if (!anns.length) return -1;
+    const opt = myChart.getOption();
+    if (!opt || !opt.xAxis || !opt.yAxis) return -1;
+    const xType = opt.xAxis[0].type;
+    let bestIdx = -1, bestDist = SNAP_DIST;
+    anns.forEach((ann, i) => {
+      let coord;
+      if (xType === 'category') {
+        coord = myChart.convertToPixel({ seriesIndex: 0 }, [ann.x, ann.y]);
+      } else {
+        coord = myChart.convertToPixel('grid', [ann.x, ann.y]);
+      }
+      if (!coord) return;
+      const dx = px - coord[0];
+      const dy = py - (coord[1] - 15); // label sits ~15px above anchor
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    });
+    return bestIdx;
+  }
+
+  function onMouseDown(e) {
+    if (e.which !== 1) return;
+    const px = e.offsetX, py = e.offsetY;
+    const idx = findNearestAnnotation(px, py);
+    if (idx < 0) return;
+    dragging = { annIdx: idx, startPx: { x: px, y: py }, moved: false };
+    _annDragging = true;
+    // Prevent the native mousedown from activating box selection
+    if (e.event && e.event.stopPropagation) e.event.stopPropagation();
+    if (e.event && e.event.preventDefault) e.event.preventDefault();
+  }
+
+  function onMouseMove(e) {
+    if (!dragging) return;
+    const px = e.offsetX, py = e.offsetY;
+    const dx = px - dragging.startPx.x;
+    const dy = py - dragging.startPx.y;
+    if (!dragging.moved && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+    dragging.moved = true;
+    const dom = myChart.getDom();
+    if (dom) dom.style.cursor = 'grabbing';
+
+    const anns = cardAnnotations[cardId];
+    if (!anns || !anns[dragging.annIdx]) return;
+    const ann = anns[dragging.annIdx];
+    const opt = myChart.getOption();
+    const xType = opt.xAxis[0].type;
+    let dataCoord;
+    if (xType === 'category') {
+      dataCoord = myChart.convertFromPixel({ seriesIndex: 0 }, [px, py]);
+    } else {
+      dataCoord = myChart.convertFromPixel('grid', [px, py]);
+    }
+    if (!dataCoord) return;
+    ann.x = dataCoord[0];
+    ann.y = dataCoord[1];
+    patchAnnotationMarkPoints(cardId, myChart);
+  }
+
+  function onMouseUp() {
+    if (!dragging) return;
+    const wasMoved = dragging.moved;
+    const dom = myChart.getDom();
+    if (dom) dom.style.cursor = '';
+    dragging = null;
+    _annDragging = false;
+    if (wasMoved) {
+      _annDragSuppressClick = true;
+      setTimeout(function () { _annDragSuppressClick = false; }, 200);
+      reRenderChart(cardId);
+    }
+  }
+
+  zr.on('mousedown', onMouseDown);
+  zr.on('mousemove', onMouseMove);
+  zr.on('mouseup', onMouseUp);
+  zr.on('globalout', onMouseUp);
+
+  zr.__annDragCleanup = function () {
+    zr.off('mousedown', onMouseDown);
+    zr.off('mousemove', onMouseMove);
+    zr.off('mouseup', onMouseUp);
+    zr.off('globalout', onMouseUp);
+  };
+}
+
+
 /* ====================================================================
 
    Workspace Persistence – Auto-save / Auto-restore
@@ -11841,6 +12093,7 @@ function _collectWorkspaceState() {
       selX: card.querySelector('.p-selX')?.value || '',
       selY: card.querySelector('.p-selY')?.value || '',
       selWellCol: card.querySelector('.p-selWellCol')?.value || '',
+      groupCol: card.querySelector('.p-groupCol')?.value || '',
       model: card.querySelector('.p-model')?.value || 'exponential',
       forecast: card.querySelector('.p-forecast')?.value || '0',
       title: card.querySelector('.p-title')?.value || '',
@@ -12088,16 +12341,18 @@ async function loadWorkspace() {
       const cardSelX = c.selX || (state.pages?.find(p => p.id === cardPageId)?.selX) || state.selX || '';
       const cardSelY = c.selY || (state.pages?.find(p => p.id === cardPageId)?.selY) || state.selY || '';
       const cardSelWellCol = c.selWellCol || (state.pages?.find(p => p.id === cardPageId)?.selWellCol) || state.selWellCol || '';
+      const cardGroupCol = c.groupCol || '';
 
       // Check if we should skip this card (only if it was an empty/non-plotted config card)
       if (c.hasPlot === false) {
         continue;
       }
 
-      // Fetch wells for this card's well column if needed
-      if (cardSelWellCol && serverHasData) {
+      // Fetch wells (or group values) for this card
+      const fetchCol = cardGroupCol || cardSelWellCol;
+      if (fetchCol && serverHasData) {
         try {
-          const res = await fetch(`/api/wells?well_col=${encodeURIComponent(cardSelWellCol)}`);
+          const res = await fetch(`/api/wells?well_col=${encodeURIComponent(fetchCol)}`);
           const data = await res.json();
           allWells = data.wells || [];
         } catch (e) { allWells = state.allWells || []; }
@@ -12105,7 +12360,7 @@ async function loadWorkspace() {
         allWells = state.allWells || [];
       }
 
-      const cardId = addPlotCard(c.wells, c.model, c.forecast, c.title, c.combine, c.header, c.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol);
+      const cardId = addPlotCard(c.wells, c.model, c.forecast, c.title, c.combine, c.header, c.combineAgg || 'sum', cardSelX, cardSelY, cardSelWellCol, cardGroupCol);
 
       const cardEl = document.getElementById(cardId);
       if (cardEl) cardEl.dataset.page = cardPageId;
