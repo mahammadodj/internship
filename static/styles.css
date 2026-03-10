@@ -1054,6 +1054,56 @@ button.btn-sm {
   color: var(--accent);
 }
 
+/* --- Export menu dropdown --- */
+.export-menu-container {
+  position: relative;
+  display: inline-block;
+}
+
+.export-btn {
+  padding: 4px 10px;
+  font-size: .7rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.15s;
+  white-space: nowrap;
+}
+
+.export-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.export-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 2px;
+  z-index: 1000;
+  min-width: 80px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.export-menu-item {
+  padding: 6px 12px;
+  font-size: .7rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.1s;
+}
+
+.export-menu-item:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
 /* --- Style panel --- */
 .style-panel {
   display: none;

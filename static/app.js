@@ -1798,11 +1798,14 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
         <button onclick="saveCardAsTemplate('${cardId}')" title="Save this card as a DCA template"><svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg" style="margin-right:4px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>Template</button>
 
-        <button onclick="downloadChart('${cardId}','png')" title="Download PNG">PNG</button>
-
-        <button onclick="downloadChart('${cardId}','jpg')" title="Download JPG">JPG</button>
-
-        <button onclick="downloadChart('${cardId}','pdf')" title="Download PDF">PDF</button>
+        <div class="export-menu-container" id="exportMenu-${cardId}">
+          <button class="export-btn" onclick="toggleExportMenu('${cardId}')" title="Download chart">⬇ Export</button>
+          <div class="export-menu-dropdown" id="exportDropdown-${cardId}" style="display:none;">
+            <div class="export-menu-item" onclick="downloadChart('${cardId}','png')">PNG</div>
+            <div class="export-menu-item" onclick="downloadChart('${cardId}','jpg')">JPG</div>
+            <div class="export-menu-item" onclick="downloadChart('${cardId}','pdf')">PDF</div>
+          </div>
+        </div>
 
         <button class="reset-zoom-btn" id="resetZoom-${cardId}" onclick="resetZoom('${cardId}')">Reset Zoom</button>
 
@@ -1813,8 +1816,6 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       <div class="mini-chart" id="chart-${cardId}"></div>
 
       <div class="formula-display" id="formula-${cardId}" style="display:none;"></div>
-
-      <div class="param-display" id="params-${cardId}"></div>
 
       <div class="qi-box" id="qiBox-${cardId}" style="display:none;"></div>
 
@@ -4211,32 +4212,12 @@ function updateQiDisplay(cardId) {
   /* Update Qi box */
   const qiBoxDiv = document.getElementById('qiBox-' + cardId);
   const qiInputPanel = document.getElementById('qiInputPanel-' + cardId);
-  const isDate = w.is_date || false;
 
-  if (qiBoxDiv && Number.isFinite(Number(p.qi))) {
-    qiBoxDiv.innerHTML = `<span class="qi-box-label">Qi</span><span class="qi-box-value">${Number(p.qi).toFixed(2)}</span>`;
-    qiBoxDiv.style.display = 'inline-flex';
-    if (qiInputPanel) {
-      qiInputPanel.style.display = 'flex';
-      /* Pre-fill current Qi value */
-      const qiValInput = document.getElementById('qiValueInput-' + cardId);
-      if (qiValInput && !qiValInput.value) qiValInput.value = Number(p.qi).toFixed(2);
-
-      /* Set correct input type for date vs numeric */
-      const qiDateInput = document.getElementById('qiDateInput-' + cardId);
-      if (qiDateInput) {
-        if (isDate) {
-          qiDateInput.type = 'date';
-          qiDateInput.placeholder = 'YYYY-MM-DD';
-        } else {
-          qiDateInput.type = 'number';
-          qiDateInput.placeholder = 'X Value';
-        }
-      }
-    }
-  } else if (qiBoxDiv) {
+  if (qiBoxDiv) {
     qiBoxDiv.style.display = 'none';
-    if (qiInputPanel) qiInputPanel.style.display = 'none';
+  }
+  if (qiInputPanel) {
+    qiInputPanel.style.display = 'none';
   }
 
   renderCurveSummaryTable(cardId, data);
@@ -4556,13 +4537,12 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
 
-  let pHtml = `<span>Model: <strong>${data.model}</strong></span>`;
-
-  if (firstW.params) { for (const [k, v] of Object.entries(firstW.params)) pHtml += `<span>${k}: <strong>${v}</strong></span>`; }
-
-  if (allWellsData.length > 1) pHtml += `<span>Wells: <strong>${allWellsData.length}</strong></span>`;
-
-  paramDiv.innerHTML = pHtml;
+  if (paramDiv) {
+    let pHtml = `<span>Model: <strong>${data.model}</strong></span>`;
+    if (firstW.params) { for (const [k, v] of Object.entries(firstW.params)) pHtml += `<span>${k}: <strong>${v}</strong></span>`; }
+    if (allWellsData.length > 1) pHtml += `<span>Wells: <strong>${allWellsData.length}</strong></span>`;
+    paramDiv.innerHTML = pHtml;
+  }
 
 
 
@@ -4624,11 +4604,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   /* --- Qi box --- */
   const qiBoxDiv = document.getElementById('qiBox-' + cardId);
-  if (qiBoxDiv && firstW.params && Number.isFinite(Number(firstW.params.qi))) {
-    const qiValue = Number(firstW.params.qi);
-    qiBoxDiv.innerHTML = `<span class="qi-box-label">Qi</span><span class="qi-box-value">${qiValue.toFixed(2)}</span>`;
-    qiBoxDiv.style.display = 'inline-flex';
-  } else if (qiBoxDiv) {
+  if (qiBoxDiv) {
     qiBoxDiv.style.display = 'none';
   }
 
@@ -5282,6 +5258,25 @@ function renderSingleChart(cardId, data, forecastMonths) {
   const useLogScale = cardLogScale[cardId] || false;
   const useLogScaleX = (cardLogScaleX[cardId] || false) && !isDate; // X log only for numeric axes
 
+  /* When log scale is on, auto-fit y axis to the visible positive data */
+  let logYMin, logYMax;
+  if (useLogScale) {
+    let allYVals = [];
+    series.forEach(s => {
+      if (!s.data) return;
+      s.data.forEach(pt => {
+        const v = Array.isArray(pt) ? pt[1] : (typeof pt === 'object' ? pt.value?.[1] : null);
+        if (v != null && Number.isFinite(v) && v > 0) allYVals.push(v);
+      });
+    });
+    if (allYVals.length > 0) {
+      const rawMin = Math.min(...allYVals);
+      const rawMax = Math.max(...allYVals);
+      logYMin = Math.pow(10, Math.floor(Math.log10(rawMin)));
+      logYMax = Math.pow(10, Math.ceil(Math.log10(rawMax)));
+    }
+  }
+
 
 
   /* --- % Change & Difference graphic --- */
@@ -5406,7 +5401,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
           return Number(val.toPrecision(3)).toString();
         }
       },
-      min: (useLogScale && !(cardAxisAutoFit[cardId] && cardAxisAutoFit[cardId].y)) ? 0.01 : undefined
+      min: (useLogScale && !(cardAxisAutoFit[cardId] && cardAxisAutoFit[cardId].y)) ? (logYMin ?? 0.01) : undefined,
+      max: (useLogScale && !(cardAxisAutoFit[cardId] && cardAxisAutoFit[cardId].y)) ? (logYMax ?? undefined) : undefined
     },
 
 
@@ -7443,6 +7439,22 @@ async function _loadDcaTemplatesFromIDB() {
    Download Chart
 
    ==================================================================== */
+
+function toggleExportMenu(cardId) {
+  const dropdown = document.getElementById('exportDropdown-' + cardId);
+  if (dropdown) {
+    dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+    
+    // Close menu when clicking outside
+    document.addEventListener('click', function closeMenu(e) {
+      const container = document.getElementById('exportMenu-' + cardId);
+      if (container && !container.contains(e.target)) {
+        dropdown.style.display = 'none';
+        document.removeEventListener('click', closeMenu);
+      }
+    });
+  }
+}
 
 function downloadChart(cardId, format) {
 
