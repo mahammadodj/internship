@@ -1713,6 +1713,11 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
             <input type="text" class="well-picker-search" placeholder="Search wells…" oninput="filterWells('${cardId}', this.value)">
 
+            <div class="well-picker-actions">
+              <button class="well-picker-action-btn" onclick="selectAllWells('${cardId}')">Select All</button>
+              <button class="well-picker-action-btn" onclick="deselectAllWells('${cardId}')">Deselect All</button>
+            </div>
+
             <label class="well-picker-combine"><input type="checkbox" class="p-combine"> Combine</label>
 
             <div class="well-picker-agg-row">
@@ -1748,7 +1753,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       </div>
 
-      <div class="control-group"><label>Forecast (months)</label><input type="number" class="p-forecast" value="${presetForecast || 0}" min="0" style="width:100px;"></div>
+      <div class="control-group"><label>Forecast (months)</label><input type="number" class="p-forecast" value="${presetForecast || 0}" min="0" style="width:100px;" onchange="updateForecastOnly('${cardId}')"></div>
 
       <div class="control-group"><label>X Labels</label><input type="number" class="p-xlabels" value="8" min="2" max="50" style="width:70px;"></div>
 
@@ -1838,7 +1843,10 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       <div class="dca-stats-summary" id="dcaStats-${cardId}" style="display:none;"></div>
 
       <div class="curve-summary-wrap" id="curveSummaryWrap-${cardId}" style="display:none;">
-        <div class="curve-summary-title">Curve Summary</div>
+        <div class="curve-summary-header">
+          <span class="curve-summary-title">Curve Summary</span>
+          <button class="curve-summary-clear-btn" onclick="clearAllCurvesFromPanel('${cardId}')" title="Remove all curves">Remove All</button>
+        </div>
         <div class="curve-summary-table-wrap" id="curveSummary-${cardId}"></div>
       </div>
 
@@ -2879,6 +2887,64 @@ async function runSingleDCA(cardId) {
 }
 
 
+/* Rebuild forecast for the main curve (and multi-fit curves) client-side
+   without re-fitting. Called when only forecast months changes. */
+function updateForecastOnly(cardId) {
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length === 0) return;
+
+  const card = document.getElementById(cardId);
+  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+
+  for (let wi = 0; wi < data.wells.length; wi++) {
+    const w = data.wells[wi];
+    if (!w.params || !w.t || w.t.length === 0) continue;
+
+    const model = data.model || 'exponential';
+    const isDate = w.is_date || false;
+    const excl = cardExclusions[cardId] || new Set();
+
+    /* Find last included t value */
+    let lastT = w.t[w.t.length - 1];
+    for (let i = w.t.length - 1; i >= 0; i--) {
+      if (!excl.has(i)) { lastT = w.t[i]; break; }
+    }
+
+    if (forecastMonths <= 0) {
+      w.forecast = {};
+    } else {
+      const nMonths = Math.floor(forecastMonths);
+      const fT = [], fY = [], fX = [];
+      for (let i = 0; i < nMonths; i++) {
+        const tVal = lastT + 30.4375 * (i + 1);
+        fT.push(tVal);
+        const yVal = evalDeclineModel(model, tVal, w.params);
+        fY.push(isFinite(yVal) ? yVal : 0);
+      }
+
+      if (isDate) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = parseDateStr(w.x[0]);
+        const tOffset = w.t[0] || 0;
+        for (let i = 0; i < fT.length; i++) {
+          fX.push(formatDateTs(firstDateMs + (fT[i] - tOffset) * MS_PER_DAY));
+        }
+      } else {
+        const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
+        for (let i = 0; i < fT.length; i++) { fX.push(fT[i] - t0 + x0); }
+      }
+
+      w.forecast = { x: fX, y: fY, t: fT };
+    }
+  }
+
+  saveZoomState(cardId);
+  if (cardZoomState[cardId]) {
+    delete cardZoomState[cardId].xMax;
+  }
+  renderSingleChart(cardId, data, forecastMonths);
+}
+
 
 function toggleExclusion(cardId, index) {
 
@@ -3158,6 +3224,9 @@ function updatePctChangeGraphic(cardId, myChart) {
 
 
 /* ---- Decline model evaluation functions (mirror backend) ---- */
+
+/* Return t adjusted for a multi-fit curve's tOffset (re-baselined t). */
+function _mfT(mf, t) { return t - (mf.tOffset || 0); }
 
 function evalDeclineModel(model, t, params) {
 
@@ -3548,7 +3617,7 @@ function setupPCurveDragHandles(cardId, myChart) {
       const mf = fits.find(f => f.id === dragging.mfId);
       if (!mf || !mf.params) return;
 
-      const newDi = solveForDi(mf.model, mf.params.qi, mf.params.b, anchorT, newDataY);
+      const newDi = solveForDi(mf.model, mf.params.qi, mf.params.b, _mfT(mf, anchorT), newDataY);
       mf.params.di = newDi;
 
       if (mf.indices && w.t) {
@@ -3556,7 +3625,7 @@ function setupPCurveDragHandles(cardId, myChart) {
         const idxMax = Math.max(...mf.indices);
         mf.fittedData = [];
         for (let i = idxMin; i <= Math.min(idxMax, w.t.length - 1); i++) {
-          const yVal = evalDeclineModel(mf.model, w.t[i], mf.params);
+          const yVal = evalDeclineModel(mf.model, _mfT(mf, w.t[i]), mf.params);
           mf.fittedData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], yVal]);
         }
       }
@@ -3579,7 +3648,7 @@ function setupPCurveDragHandles(cardId, myChart) {
             const nM = Math.round(_fcMonths);
             for (let i = 1; i <= nM; i++) {
               const tVal = mfTMax + 30.4375 * i;
-              const yVal = evalDeclineModel(mf.model, tVal, mf.params);
+              const yVal = evalDeclineModel(mf.model, _mfT(mf, tVal), mf.params);
               if (isDate) {
                 mfCombined.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
               } else {
@@ -3605,7 +3674,7 @@ function setupPCurveDragHandles(cardId, myChart) {
             const idxMin = mf.indices ? Math.min(...mf.indices) : 0;
             const idxMax = mf.indices ? Math.max(...mf.indices) : w.t.length - 1;
             for (let i = idxMin; i <= Math.min(idxMax, w.t.length - 1); i++) {
-              pData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], evalDeclineModel(mf.model, w.t[i], pParams)]);
+              pData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], evalDeclineModel(mf.model, _mfT(mf, w.t[i]), pParams)]);
             }
             s.data = pData;
           }
@@ -3746,7 +3815,7 @@ function updatePCurveSeries(cardId, myChart, curveKeyOverride) {
       const idxMin = mf.indices ? Math.min(...mf.indices) : 0;
       const idxMax = mf.indices ? Math.max(...mf.indices) : w.t.length - 1;
       for (let i = idxMin; i <= Math.min(idxMax, w.t.length - 1); i++) {
-        const yVal = evalDeclineModel(mf.model, w.t[i], pParams);
+        const yVal = evalDeclineModel(mf.model, _mfT(mf, w.t[i]), pParams);
         pData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], yVal]);
       }
       /* Extend dynamically: mfTMax + current forecastMonths */
@@ -3762,7 +3831,7 @@ function updatePCurveSeries(cardId, myChart, curveKeyOverride) {
         const nM = Math.round(_pFcMonths);
         for (let fi = 1; fi <= nM; fi++) {
           const tVal = mfTMaxP + 30.4375 * fi;
-          const yVal = evalDeclineModel(mf.model, tVal, pParams);
+          const yVal = evalDeclineModel(mf.model, _mfT(mf, tVal), pParams);
           if (isDate) {
             pData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
           } else {
@@ -3986,7 +4055,7 @@ function setupQiDragHandle(cardId, myChart) {
         mf.fittedData = [];
         for (const idx of mf.indices) {
           if (idx < w.t.length) {
-            const yVal = evalDeclineModel(mf.model, w.t[idx], mf.params);
+            const yVal = evalDeclineModel(mf.model, _mfT(mf, w.t[idx]), mf.params);
             mf.fittedData.push([isDate ? parseDateStr(w.x[idx]) : w.x[idx], yVal]);
           }
         }
@@ -5090,7 +5159,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
         const nMonths = Math.round(_fcMonths);
         for (let i = 1; i <= nMonths; i++) {
           const tVal = mfTMax + 30.4375 * i;
-          const yVal = evalDeclineModel(mf.model, tVal, mf.params);
+          const yVal = evalDeclineModel(mf.model, _mfT(mf, tVal), mf.params);
           if (isDate) {
             pts.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
           } else {
@@ -5147,7 +5216,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
             const idxMin = mf.indices ? Math.min(...mf.indices) : 0;
             const idxMax = mf.indices ? Math.max(...mf.indices) : mfW.t.length - 1;
             for (let i = idxMin; i <= Math.min(idxMax, mfW.t.length - 1); i++) {
-              const yVal = evalDeclineModel(mf.model, mfW.t[i], pParams);
+              const yVal = evalDeclineModel(mf.model, _mfT(mf, mfW.t[i]), pParams);
               if (isDate) {
                 pData.push([parseDateStr(mfW.x[i]), yVal]);
               } else {
@@ -5163,7 +5232,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
               const nM = Math.round(_fcMonths);
               for (let i = 1; i <= nM; i++) {
                 const tVal = mfTMax + 30.4375 * i;
-                const yVal = evalDeclineModel(mf.model, tVal, pParams);
+                const yVal = evalDeclineModel(mf.model, _mfT(mf, tVal), pParams);
                 if (isDate) {
                   pData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
                 } else {
@@ -5656,7 +5725,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
         const nMonths = Math.round(_fcMonths);
         for (let i = 1; i <= nMonths; i++) {
           const tVal = mfTMax + 30.4375 * i;
-          const yVal = evalDeclineModel(mf.model, tVal, mf.params);
+          const yVal = evalDeclineModel(mf.model, _mfT(mf, tVal), mf.params);
           if (isDate) {
             dynForecast.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
           } else {
@@ -5934,7 +6003,7 @@ function renderCurveSummaryTable(cardId, data) {
         const pParams = { ...mf.params, di: diVal };
         const vals = [];
         for (let i = idxMin; i <= Math.min(idxMax, w0.t.length - 1); i++) {
-          const y = evalDeclineModel(mf.model, w0.t[i], pParams);
+          const y = evalDeclineModel(mf.model, _mfT(mf, w0.t[i]), pParams);
           if (Number.isFinite(y)) vals.push(y);
         }
         return vals;
@@ -6493,18 +6562,22 @@ async function _performMultiFit(cardId, indices, modelOverride) {
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
 
   // Build t and y arrays for the selected indices
-  const tFit = [], yFit = [];
+  const tFitRaw = [], yFit = [];
   for (const i of indices) {
     if (i < w.t.length && w.y_actual[i] != null) {
-      tFit.push(w.t[i]);
+      tFitRaw.push(w.t[i]);
       yFit.push(w.y_actual[i]);
     }
   }
 
-  if (tFit.length < 3) {
+  if (tFitRaw.length < 3) {
     showToast('Need at least 3 valid data points', 'warning');
     return;
   }
+
+  // Re-baseline t so fitting starts near t=0 (avoids numerical issues with large absolute t)
+  const tMinMf = Math.min(...tFitRaw);
+  const tFit = tFitRaw.map(v => v - tMinMf);
 
   try {
     const res = await fetch('/api/fit_inline', {
@@ -6528,11 +6601,11 @@ async function _performMultiFit(cardId, indices, modelOverride) {
         const MS_PER_DAY = 86400000;
         const firstDateMs = parseDateStr(w.x[0]);
         const tOffset = w.t[0] || 0;
-        const ms = firstDateMs + (tVal - tOffset) * MS_PER_DAY;
+        const ms = firstDateMs + (tFitRaw[i] - tOffset) * MS_PER_DAY;
         fittedData.push([ms, yVal]);
       } else {
         const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
-        fittedData.push([tVal - t0 + x0, yVal]);
+        fittedData.push([tFitRaw[i] - t0 + x0, yVal]);
       }
     }
 
@@ -6544,11 +6617,11 @@ async function _performMultiFit(cardId, indices, modelOverride) {
           const MS_PER_DAY = 86400000;
           const firstDateMs = parseDateStr(w.x[0]);
           const tOffset = w.t[0] || 0;
-          const ms = firstDateMs + (fit.forecast_t[i] - tOffset) * MS_PER_DAY;
+          const ms = firstDateMs + (fit.forecast_t[i] + tMinMf - tOffset) * MS_PER_DAY;
           forecastData.push([ms, fit.forecast_y[i]]);
         } else {
           const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
-          forecastData.push([fit.forecast_t[i] - t0 + x0, fit.forecast_y[i]]);
+          forecastData.push([fit.forecast_t[i] + tMinMf - t0 + x0, fit.forecast_y[i]]);
         }
       }
       // Bridge from last fitted point to first forecast point
@@ -6571,6 +6644,7 @@ async function _performMultiFit(cardId, indices, modelOverride) {
       fittedData: fittedData,
       forecastData: forecastData,
       forecast_t: fit.forecast_t || [],
+      tOffset: tMinMf,
     };
     cardMultiFits[cardId].push(curveFit);
     _saveOriginalParams(cardId, 'mf_' + curveFit.id, curveFit.params);
@@ -6612,14 +6686,17 @@ async function changeMultiFitModel(cardId, mfId, newModel) {
   const card = document.getElementById(cardId);
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
 
-  const tFit = [], yFit = [];
+  const tFitRaw = [], yFit = [];
   for (const i of indices) {
     if (i < w.t.length && w.y_actual[i] != null) {
-      tFit.push(w.t[i]);
+      tFitRaw.push(w.t[i]);
       yFit.push(w.y_actual[i]);
     }
   }
-  if (tFit.length < 3) { showToast('Not enough valid data points', 'warning'); return; }
+  if (tFitRaw.length < 3) { showToast('Not enough valid data points', 'warning'); return; }
+
+  const tMinMf = Math.min(...tFitRaw);
+  const tFit = tFitRaw.map(v => v - tMinMf);
 
   try {
     const res = await fetch('/api/fit_inline', {
@@ -6643,10 +6720,10 @@ async function changeMultiFitModel(cardId, mfId, newModel) {
         const MS_PER_DAY = 86400000;
         const firstDateMs = parseDateStr(w.x[0]);
         const tOffset = w.t[0] || 0;
-        fittedData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+        fittedData.push([firstDateMs + (tFitRaw[i] - tOffset) * MS_PER_DAY, yVal]);
       } else {
         const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
-        fittedData.push([tVal - t0 + x0, yVal]);
+        fittedData.push([tFitRaw[i] - t0 + x0, yVal]);
       }
     }
 
@@ -6656,6 +6733,7 @@ async function changeMultiFitModel(cardId, mfId, newModel) {
     mf.equation = fit.equation || '';
     mf.fittedData = fittedData;
     mf.forecast_t = fit.forecast_t || [];
+    mf.tOffset = tMinMf;
     _saveOriginalParams(cardId, 'mf_' + mf.id, mf.params);
 
     rebuildCurveStyleSections(cardId);
@@ -6744,7 +6822,7 @@ function resetCurveToOriginal(cardId, type, id) {
       mf.fittedData = [];
       for (const i of mf.indices) {
         if (i < w.t.length && w.y_actual[i] != null) {
-          const yVal = evalDeclineModel(mf.model, w.t[i], mf.params);
+          const yVal = evalDeclineModel(mf.model, _mfT(mf, w.t[i]), mf.params);
           mf.fittedData.push([isDate ? parseDateStr(w.x[i]) : w.x[i], yVal]);
         }
       }
@@ -6758,10 +6836,10 @@ function resetCurveToOriginal(cardId, type, id) {
           const MS_PER_DAY = 86400000;
           const firstDateMs = parseDateStr(w.x[0]);
           const tOffset = w.t[0] || 0;
-          mf.forecastData.push([firstDateMs + (mf.forecast_t[i] - tOffset) * MS_PER_DAY, yVal]);
+          mf.forecastData.push([firstDateMs + (mf.forecast_t[i] + (mf.tOffset || 0) - tOffset) * MS_PER_DAY, yVal]);
         } else {
           const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
-          mf.forecastData.push([mf.forecast_t[i] - t0 + x0, yVal]);
+          mf.forecastData.push([mf.forecast_t[i] + (mf.tOffset || 0) - t0 + x0, yVal]);
         }
       }
       if (mf.fittedData && mf.fittedData.length > 0) {
@@ -8037,14 +8115,17 @@ async function refitMultiFitCurveIndices(cardId, mfId) {
   const card = document.getElementById(cardId);
   const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
 
-  const tFit = [], yFit = [];
+  const tFitRaw = [], yFit = [];
   for (const i of indices) {
     if (i < w.t.length && w.y_actual[i] != null) {
-      tFit.push(w.t[i]);
+      tFitRaw.push(w.t[i]);
       yFit.push(w.y_actual[i]);
     }
   }
-  if (tFit.length < 3) { showToast('Not enough valid data points', 'warning'); return; }
+  if (tFitRaw.length < 3) { showToast('Not enough valid data points', 'warning'); return; }
+
+  const tMinMf = Math.min(...tFitRaw);
+  const tFit = tFitRaw.map(v => v - tMinMf);
 
   try {
     const res = await fetch('/api/fit_inline', {
@@ -8068,10 +8149,10 @@ async function refitMultiFitCurveIndices(cardId, mfId) {
         const MS_PER_DAY = 86400000;
         const firstDateMs = parseDateStr(w.x[0]);
         const tOffset = w.t[0] || 0;
-        fittedData.push([firstDateMs + (tVal - tOffset) * MS_PER_DAY, yVal]);
+        fittedData.push([firstDateMs + (tFitRaw[i] - tOffset) * MS_PER_DAY, yVal]);
       } else {
         const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
-        fittedData.push([tVal - t0 + x0, yVal]);
+        fittedData.push([tFitRaw[i] - t0 + x0, yVal]);
       }
     }
 
@@ -8083,10 +8164,10 @@ async function refitMultiFitCurveIndices(cardId, mfId) {
           const MS_PER_DAY = 86400000;
           const firstDateMs = parseDateStr(w.x[0]);
           const tOffset = w.t[0] || 0;
-          forecastData.push([firstDateMs + (fit.forecast_t[i] - tOffset) * MS_PER_DAY, fit.forecast_y[i]]);
+          forecastData.push([firstDateMs + (fit.forecast_t[i] + tMinMf - tOffset) * MS_PER_DAY, fit.forecast_y[i]]);
         } else {
           const x0 = w.x[0] || 0, t0 = w.t[0] || 0;
-          forecastData.push([fit.forecast_t[i] - t0 + x0, fit.forecast_y[i]]);
+          forecastData.push([fit.forecast_t[i] + tMinMf - t0 + x0, fit.forecast_y[i]]);
         }
       }
       if (fittedData.length > 0) forecastData.unshift(fittedData[fittedData.length - 1]);
@@ -8097,6 +8178,7 @@ async function refitMultiFitCurveIndices(cardId, mfId) {
     mf.fittedData = fittedData;
     mf.forecastData = forecastData;
     mf.forecast_t = fit.forecast_t || [];
+    mf.tOffset = tMinMf;
     _saveOriginalParams(cardId, 'mf_' + mf.id, mf.params);
 
     rebuildCurveStyleSections(cardId);
@@ -11361,6 +11443,30 @@ function filterWells(cardId, query) {
     item.style.display = text.includes(q) ? '' : 'none';
 
   });
+
+}
+
+function selectAllWells(cardId) {
+
+  const wp = document.getElementById('wp-' + cardId);
+
+  if (!wp) return;
+
+  wp.querySelectorAll('.well-picker-item input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+
+  updateWellPickerDisplay(cardId);
+
+}
+
+function deselectAllWells(cardId) {
+
+  const wp = document.getElementById('wp-' + cardId);
+
+  if (!wp) return;
+
+  wp.querySelectorAll('.well-picker-item input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+
+  updateWellPickerDisplay(cardId);
 
 }
 

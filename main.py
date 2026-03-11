@@ -920,7 +920,7 @@ async def decline_curve_analysis(
             eq_fmt = _MODELS[model][4]
             p_values = [params[n] for n in param_names]
             fitted_arr = func(t, *p_values)
-            fitted_arr = np.nan_to_num(fitted_arr, nan=0.0, posinf=0.0, neginf=0.0)
+            fitted_arr = np.where(np.isfinite(fitted_arr), fitted_arr, np.nan)
             # Null-out fitted values for excluded points before the fitted region
             # so the fitted line only appears from the first included point onward
             if excl:
@@ -1032,7 +1032,7 @@ async def fit_inline(req: FitInlineRequest):
 
     p_vals = [params[n] for n in param_names]
     fitted = func(t_arr, *p_vals)
-    fitted = np.nan_to_num(fitted, nan=0.0, posinf=0.0, neginf=0.0)
+    fitted = [None if not np.isfinite(v) else float(v) for v in fitted]
 
     try:
         equation = eq_fmt.format(**params)
@@ -1041,7 +1041,7 @@ async def fit_inline(req: FitInlineRequest):
 
     result: dict = {
         "params": params,
-        "y_fitted": fitted.tolist(),
+        "y_fitted": fitted,
         "equation": equation,
     }
 
@@ -1051,7 +1051,7 @@ async def fit_inline(req: FitInlineRequest):
         n_months = int(req.forecast_months)
         t_forecast = np.array([last_t + 30.4375 * (i + 1) for i in range(n_months)])
         q_forecast = func(t_forecast, *p_vals)
-        q_forecast = np.nan_to_num(q_forecast, nan=0.0, posinf=0.0, neginf=0.0)
+        q_forecast = np.where(np.isfinite(q_forecast), q_forecast, 0.0)
         result["forecast_t"] = t_forecast.tolist()
         result["forecast_y"] = q_forecast.tolist()
 
