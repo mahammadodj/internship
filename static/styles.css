@@ -1456,6 +1456,7 @@ button.btn-sm {
   gap: 8px;
   padding: 4px 0;
   border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
 }
 
 .mf-item:last-child {
@@ -1499,6 +1500,31 @@ button.btn-sm {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mf-forecast-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: .7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mf-forecast-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: .72rem;
+  padding: 2px 4px;
+  outline: none;
+  transition: border-color .15s;
+}
+
+.mf-forecast-input:focus {
+  border-color: var(--accent);
 }
 
 .mf-remove {

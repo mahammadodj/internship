@@ -1753,7 +1753,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       </div>
 
-      <div class="control-group"><label>Forecast (months)</label><input type="number" class="p-forecast" value="${presetForecast || 0}" min="0" style="width:100px;" onchange="updateForecastOnly('${cardId}')"></div>
+      <div class="control-group"><label>Forecast (months)</label><input type="number" class="p-forecast" value="${presetForecast || 0}" min="0" style="width:100px;" onchange="onGlobalForecastChange('${cardId}')"></div>
 
       <div class="control-group"><label>X Labels</label><input type="number" class="p-xlabels" value="8" min="2" max="50" style="width:70px;"></div>
 
@@ -2598,6 +2598,28 @@ function readCardStyles(cardId) {
     };
   });
 
+  /* Read per-curve forecast months from the All Curves panel */
+  const panel = document.getElementById('multiFitPanel-' + cardId);
+  if (panel) {
+    panel.querySelectorAll('.mf-forecast-input').forEach(inp => {
+      const cType = inp.getAttribute('data-curve-type');
+      const cId = inp.getAttribute('data-curve-id');
+      const val = inp.value !== '' ? parseFloat(inp.value) : null;
+      if (cType === 'main') {
+        /* Attach to the first well's curveStyles (or matching well) */
+        const wellName = cId;
+        if (curveStyles[wellName]) {
+          curveStyles[wellName].forecastMonths = val;
+        }
+      } else if (cType === 'multi') {
+        const key = 'mf_' + cId;
+        if (multiFitStyles[key]) {
+          multiFitStyles[key].forecastMonths = val;
+        }
+      }
+    });
+  }
+
   /* First curve provides backward-compatible top-level defaults */
   const firstWell = Object.keys(curveStyles)[0];
   const first = firstWell ? curveStyles[firstWell] : {};
@@ -2877,7 +2899,7 @@ async function runSingleDCA(cardId) {
 
       await refitCurrentData(cardId);
     } else {
-      renderSingleChart(cardId, data, months);
+      updateForecastOnly(cardId);
     }
 
   } catch (err) { customAlert(err.message); }
@@ -2894,11 +2916,20 @@ function updateForecastOnly(cardId) {
   if (!data || !data.wells || data.wells.length === 0) return;
 
   const card = document.getElementById(cardId);
-  const forecastMonths = parseFloat(card?.querySelector('.p-forecast')?.value || 0);
+  const globalForecastObj = card?.querySelector('.p-forecast');
+  const originalGlobalForecast = parseFloat(globalForecastObj?.value || 0);
+
+  const stylesObj = cardStyles[cardId] || {};
+  const curveStyles = stylesObj.curveStyles || {};
+  const mfStyles = stylesObj.multiFitStyles || {};
 
   for (let wi = 0; wi < data.wells.length; wi++) {
     const w = data.wells[wi];
     if (!w.params || !w.t || w.t.length === 0) continue;
+
+    const cs = curveStyles[w.well] || {};
+    let wForecastMonths = cs.forecastMonths != null ? parseFloat(cs.forecastMonths) : originalGlobalForecast;
+    if (isNaN(wForecastMonths)) wForecastMonths = originalGlobalForecast;
 
     const model = data.model || 'exponential';
     const isDate = w.is_date || false;
@@ -2910,10 +2941,10 @@ function updateForecastOnly(cardId) {
       if (!excl.has(i)) { lastT = w.t[i]; break; }
     }
 
-    if (forecastMonths <= 0) {
+    if (wForecastMonths <= 0) {
       w.forecast = {};
     } else {
-      const nMonths = Math.floor(forecastMonths);
+      const nMonths = Math.floor(wForecastMonths);
       const fT = [], fY = [], fX = [];
       for (let i = 0; i < nMonths; i++) {
         const tVal = lastT + 30.4375 * (i + 1);
@@ -2938,11 +2969,70 @@ function updateForecastOnly(cardId) {
     }
   }
 
+  const multiFits = cardMultiFits[cardId] || [];
+  multiFits.forEach(mf => {
+    if (!mf.params) return;
+    const ms = mfStyles['mf_' + mf.id] || {};
+    let mfForecastMonths = ms.forecastMonths != null ? parseFloat(ms.forecastMonths) : originalGlobalForecast;
+    if (isNaN(mfForecastMonths)) mfForecastMonths = originalGlobalForecast;
+    const w0 = data.wells[0];
+    const isDate = w0.is_date || false;
+
+    if (mfForecastMonths <= 0) {
+      mf.forecastData = [];
+      mf.forecast_t = [];
+      if (mf.forecast_y) mf.forecast_y = [];
+    } else {
+      const nMonths = Math.floor(mfForecastMonths);
+      let lastT = 0;
+      if (mf.indices && mf.indices.length > 0 && w0.t) {
+        lastT = Math.max(...mf.indices.map(i => w0.t[i]));
+      }
+
+      const fT = [], fY = [];
+      for (let i = 0; i < nMonths; i++) {
+        const tVal = lastT + 30.4375 * (i + 1);
+        fT.push(tVal);
+        const yVal = evalDeclineModel(mf.model || 'exponential', tVal, mf.params);
+        fY.push(isFinite(yVal) ? yVal : 0);
+      }
+
+      mf.forecast_t = fT;
+      mf.forecastData = [];
+      if (isDate) {
+        const MS_PER_DAY = 86400000;
+        const firstDateMs = parseDateStr(w0.x[0]);
+        const tOffset = w0.t[0] || 0;
+        for (let i = 0; i < fT.length; i++) {
+          let tMF = fT[i];
+          if (mf.tOffset != null && w0.t[mf.indices[0]] != null) {
+              tMF = fT[i]; 
+          }
+          // The API uses fT directly to plot: ms = firstDateMs + (fT[i] + tMinMf - tOffset) * MS_PER_DAY
+          // Wait, 'refreshMultiFit' says: forecastData.push([firstDateMs + (fit.forecast_t[i] + tMinMf - tOffset) * MS_PER_DAY, fit.forecast_y[i]])
+          // Actually, 'tMinMf' is mf.tOffset or mf.tMinMf. It seems the API resets t=0 for the start of the mf subset!
+          // So if t_fit for mf started at 0, lastT is the local max.
+          // Let's use the local mf tOffset property just like other places.
+          mf.forecastData.push([firstDateMs + ((fT[i] + (mf.tOffset || 0)) - tOffset) * MS_PER_DAY, fY[i]]);
+        }
+      } else {
+        const x0 = w0.x[0] || 0, t0 = w0.t[0] || 0;
+        for (let i = 0; i < fT.length; i++) { 
+          mf.forecastData.push([(fT[i] + (mf.tOffset || 0)) - t0 + x0, fY[i]]);
+        }
+      }
+
+      if (mf.fittedData && mf.fittedData.length > 0 && mf.forecastData.length > 0) {
+        mf.forecastData.unshift(mf.fittedData[mf.fittedData.length - 1]);
+      }
+    }
+  });
+
   saveZoomState(cardId);
   if (cardZoomState[cardId]) {
     delete cardZoomState[cardId].xMax;
   }
-  renderSingleChart(cardId, data, forecastMonths);
+  renderSingleChart(cardId, data, originalGlobalForecast); 
 }
 
 
@@ -3636,7 +3726,12 @@ function setupPCurveDragHandles(cardId, myChart) {
         const s = opt.series[si];
         if (s.name === mfName && s.type === 'line' && !s.id) {
           let mfCombined = mf.fittedData ? [...mf.fittedData] : [];
-          const _fcMonths = parseFloat(document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+          let _fcMonths = parseFloat(document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+          const st = cardStyles[cardId] || {};
+          const ms = (st.multiFitStyles || {})['mf_' + mf.id] || {};
+          if (ms.forecastMonths != null && !isNaN(parseFloat(ms.forecastMonths))) {
+            _fcMonths = parseFloat(ms.forecastMonths);
+          }
           const mfTMax = mf.indices && mf.indices.length > 0 && w.t
             ? Math.max(...mf.indices.filter(i => i < w.t.length).map(i => w.t[i]))
             : null;
@@ -5130,12 +5225,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   /* ---- Multi-fit additional curves ---- */
   const multiFits = cardMultiFits[cardId];
-  const _fcMonths = parseFloat(forecastMonths) || 0;
   if (multiFits && multiFits.length > 0) {
     const mfStylesObj = st.multiFitStyles || {};
     multiFits.forEach((mf, mfIdx) => {
       const mfKey = 'mf_' + mf.id;
       const ms = mfStylesObj[mfKey] || {};
+      let _fcMonths = ms.forecastMonths != null ? parseFloat(ms.forecastMonths) : parseFloat(forecastMonths) || 0;
+      if (isNaN(_fcMonths)) _fcMonths = parseFloat(forecastMonths) || 0;
       const mfColor = ms.color || mf.color;
       const mfLineStyle = ms.lineStyle || 'solid';
       const mfLineWidth = ms.lineWidth != null ? ms.lineWidth : 2.5;
@@ -5697,9 +5793,13 @@ function renderSingleChart(cardId, data, forecastMonths) {
     // Build multi-fit curve table data
     const mfDataMap = {};
     const mfList = cardMultiFits[cardId] || [];
-    const _fcMonths = parseFloat(forecastMonths) || 0;
 
     mfList.forEach(mf => {
+      let _fcMonths = parseFloat(forecastMonths) || 0;
+      const ms = (st.multiFitStyles || {})['mf_' + mf.id] || {};
+      if (ms.forecastMonths != null && !isNaN(parseFloat(ms.forecastMonths))) {
+        _fcMonths = parseFloat(ms.forecastMonths);
+      }
       const mfRows = [];
       const w0 = data.wells && data.wells.length > 0 ? data.wells[0] : allWellsData[0];
       const mfTMax = mf.indices && mf.indices.length > 0 && w0 && w0.t
@@ -6654,7 +6754,7 @@ async function _performMultiFit(cardId, indices, modelOverride) {
 
     // Re-render chart and update management panel
     saveZoomState(cardId);
-    renderSingleChart(cardId, lastData, forecastMonths);
+    updateForecastOnly(cardId);
     updateMultiFitPanel(cardId);
 
     const fmt = (v) => typeof v === 'number' ? v.toFixed(4) : v;
@@ -6738,7 +6838,7 @@ async function changeMultiFitModel(cardId, mfId, newModel) {
 
     rebuildCurveStyleSections(cardId);
     saveZoomState(cardId);
-    renderSingleChart(cardId, lastData, forecastMonths);
+    updateForecastOnly(cardId);
     updateMultiFitPanel(cardId);
 
     const fmt = (v) => typeof v === 'number' ? v.toFixed(4) : v;
@@ -6969,6 +7069,7 @@ function updateMultiFitPanel(cardId) {
       allCurves.push({
         type: 'main',
         id: '',
+        wellName: w.well || '',
         name: fittedName,
         label: (isSingle ? (w.well || 'Fitted') : w.well) + ' (' + model + ')',
         model: model,
@@ -7012,6 +7113,8 @@ function updateMultiFitPanel(cardId) {
     return;
   }
 
+  const globalForecast = parseFloat(document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+
   let html = '<div class="mf-header"><span class="mf-title">All Curves (' + allCurves.length + ')</span>'
     + '<button class="mf-clear-all" onclick="clearAllCurvesFromPanel(\'' + cardId + '\')" title="Remove all curves from plot">Clear All</button></div>';
 
@@ -7049,10 +7152,28 @@ function updateMultiFitPanel(cardId) {
     });
     modelSelectHtml += '</select>';
 
+    /* Per-curve forecast months input */
+    let curForecastVal = globalForecast;
+    const st = cardStyles[cardId] || {};
+    if (c.type === 'main') {
+      const cs = (st.curveStyles && st.curveStyles[c.wellName]) || {};
+      if (cs.forecastMonths != null && !isNaN(cs.forecastMonths)) curForecastVal = cs.forecastMonths;
+    } else {
+      const ms = (st.multiFitStyles && st.multiFitStyles['mf_' + c.id]) || {};
+      if (ms.forecastMonths != null && !isNaN(ms.forecastMonths)) curForecastVal = ms.forecastMonths;
+    }
+
+    const curveIdAttr = c.type === 'main' ? c.wellName : c.id;
+    const forecastHtml = '<label class="mf-forecast-label" title="Forecast months for this curve">'
+      + '<span>Forecast:</span>'
+      + '<input type="number" class="mf-forecast-input" min="0" data-curve-type="' + c.type + '" data-curve-id="' + curveIdAttr + '" value="' + (curForecastVal || 0) + '" style="width:52px;margin-left:3px;" onchange="onPerCurveForecastChange(\'' + cardId + '\', this)">'
+      + '</label>';
+
     html += '<div class="mf-item' + hiddenCls + '">'
       + '<span class="mf-color-dot" style="background:' + c.color + ';"></span>'
       + '<span class="mf-label">' + eyeIcon + c.label + '</span>'
       + modelSelectHtml
+      + forecastHtml
       + '<span class="mf-params">' + paramStr + '</span>'
       + actionsHtml
       + '</div>';
@@ -7061,6 +7182,47 @@ function updateMultiFitPanel(cardId) {
   panel.innerHTML = html;
   panel.style.display = 'block';
 }
+
+/* Called when a per-curve forecast input in the All Curves panel changes */
+function onPerCurveForecastChange(cardId, inputEl) {
+  /* Clamp to >= 0 */
+  let val = parseFloat(inputEl.value);
+  if (isNaN(val) || val < 0) { val = 0; inputEl.value = 0; }
+  /* Save styles (reads from panel inputs via readCardStyles) then recalculate */
+  cardStyles[cardId] = readCardStyles(cardId);
+  updateForecastOnly(cardId);
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
+/* Called when the global Forecast (months) input changes.
+   Syncs ALL per-curve forecast inputs in the All Curves panel to the new value. */
+function onGlobalForecastChange(cardId) {
+  const card = document.getElementById(cardId);
+  const globalInput = card?.querySelector('.p-forecast');
+  let globalVal = parseFloat(globalInput?.value || 0);
+  if (isNaN(globalVal) || globalVal < 0) { globalVal = 0; if (globalInput) globalInput.value = 0; }
+
+  /* Update every per-curve forecast input in the panel to match */
+  const panel = document.getElementById('multiFitPanel-' + cardId);
+  if (panel) {
+    panel.querySelectorAll('.mf-forecast-input').forEach(inp => {
+      inp.value = globalVal;
+    });
+  }
+
+  /* Also clear per-curve overrides in cardStyles so they all use the new global value */
+  const st = cardStyles[cardId] || {};
+  if (st.curveStyles) {
+    Object.values(st.curveStyles).forEach(cs => { cs.forecastMonths = null; });
+  }
+  if (st.multiFitStyles) {
+    Object.values(st.multiFitStyles).forEach(ms => { ms.forecastMonths = null; });
+  }
+
+  updateForecastOnly(cardId);
+  if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+}
+
 
 /* Hide a curve (and its sub-series like P10/P90) from the plot */
 function hideCurveFromPanel(cardId, subSeriesJson) {
@@ -8183,7 +8345,7 @@ async function refitMultiFitCurveIndices(cardId, mfId) {
 
     rebuildCurveStyleSections(cardId);
     saveZoomState(cardId);
-    renderSingleChart(cardId, lastData, forecastMonths);
+    updateForecastOnly(cardId);
     updateMultiFitPanel(cardId);
 
     const fmt = function (v) { return typeof v === 'number' ? v.toFixed(4) : v; };
@@ -8554,7 +8716,7 @@ async function refitCurrentData(cardId) {
     if (cardZoomState[cardId]) {
       delete cardZoomState[cardId].xMax;
     }
-    renderSingleChart(cardId, data, forecastMonths);
+    updateForecastOnly(cardId);
     if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
   } catch (e) {
     showToast('Re-fit failed: ' + e.message, 'error');
