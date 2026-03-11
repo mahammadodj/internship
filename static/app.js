@@ -1672,7 +1672,12 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
   card.innerHTML = `
 
-    <button class="plot-remove" onclick="removeCard('${cardId}')">×</button>
+    <button class="plot-remove" onclick="removeCard('${cardId}')" title="Remove Card">×</button>
+    <button class="plot-collapse" onclick="toggleCardCollapse('${cardId}')" title="Collapse/Expand">−</button>
+
+    <div class="plot-card-collapsed-header" onclick="toggleCardCollapse('${cardId}')">
+      <span class="collapsed-title" id="collapsedTitle-${cardId}">${presetTitle || 'Plot Card'}</span>
+    </div>
 
     <div class="plot-header">
 
@@ -2060,7 +2065,13 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
   });
 
   const titleInput = card.querySelector('.p-title');
-  if (titleInput) titleInput.addEventListener('input', liveStyleRerender);
+  const collTitle = document.getElementById('collapsedTitle-' + cardId);
+  if (titleInput) {
+    titleInput.addEventListener('input', () => {
+      if (collTitle) collTitle.textContent = titleInput.value || 'Plot Card';
+      liveStyleRerender();
+    });
+  }
 
   const xLabelsInput = card.querySelector('.p-xlabels');
   if (xLabelsInput) xLabelsInput.addEventListener('input', liveStyleRerender);
@@ -2303,14 +2314,13 @@ function rebuildCurveStyleSections(cardId) {
       + '<input type="range" class="sc-mf-p90-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfP90SymbolSize + '" title="Size">'
       + '<span class="style-range-val">' + mfP90SymbolSize + '</span>'
       + '</div></div>';
-    + '<input type="range" class="sc-mf-p90-msize" data-mf-id="' + mf.id + '" min="2" max="25" value="' + mfP90SymbolSize + '" title="Size">'
-      + '<span class="style-range-val">' + mfP90SymbolSize + '</span>'
-      + '</div>';
+
 
     html += '</div>';
   });
 
   container.innerHTML = html;
+  container.style.display = html ? '' : 'none';
 
   /* ---- Wire up curve selector dropdown ---- */
   const selectEl = container.querySelector('.sc-curve-select');
@@ -2699,6 +2709,14 @@ function toggleStylePanel(cardId) {
 }
 
 
+
+function toggleCardCollapse(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const isCollapsed = card.classList.toggle('collapsed');
+  const btn = card.querySelector('.plot-collapse');
+  if (btn) btn.textContent = isCollapsed ? '+' : '−';
+}
 
 function removeCard(id) {
 
@@ -3598,10 +3616,10 @@ function setupPCurveDragHandles(cardId, myChart) {
 
   function onMouseUp() {
     if (dragging) {
-      if (dragging.type === 'fitted' || dragging.type === 'multifit') {
-        saveZoomState(cardId);
-        renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
-      }
+      // Re-render to ensure all tables and panels (like 'All Curves' reset button) reflect the changed params
+      saveZoomState(cardId);
+      renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+      
       dragging = null;
       _curveDragging = false;
       myChart.getDom().style.cursor = '';
@@ -3851,217 +3869,178 @@ function setupQiDragHandle(cardId, myChart) {
 
 
 
-  /* Hit-test: is pixel within threshold of the first fitted point? */
-
+  /* Hit-test: is pixel within threshold of the first fitted point of any curve? */
   function hitTestInitialPoint(px, py) {
-
     const THRESHOLD = 14;
-
     const opt = myChart.getOption();
-
-    if (!opt || !opt.series) return false;
-
-    const firstIdx = getFirstFittedIdx();
-
-    if (firstIdx < 0) return false;
+    if (!opt || !opt.series) return null;
 
     for (let si = 0; si < opt.series.length; si++) {
-
       const s = opt.series[si];
+      if (s.type !== 'line') continue;
+      if (!s.name) continue;
 
-      if (!s.name || !s.name.endsWith('Fitted')) continue;
+      const isMain = s.name.endsWith('Fitted') && !s.name.startsWith('_');
+      const isMf = s.name.startsWith('Curve #') && !s.id;
+      if (!isMain && !isMf) continue;
 
-      const sData = s.data;
+      const sData = s.data || [];
+      if (sData.length === 0) continue;
 
-      if (!sData || sData.length === 0) continue;
-
-      /* Find the first non-null data point in this series */
-
+      // Find first non-null point
       for (let di = 0; di < sData.length; di++) {
-
         if (!Array.isArray(sData[di]) || sData[di][1] == null) continue;
-
         const ptPx = myChart.convertToPixel('grid', [sData[di][0], sData[di][1]]);
-
         if (!ptPx) continue;
 
-        if (Math.abs(ptPx[0] - px) < THRESHOLD && Math.abs(ptPx[1] - py) < THRESHOLD) return true;
-
-        break; // only check the first valid point
-
+        if (Math.abs(ptPx[0] - px) < THRESHOLD && Math.abs(ptPx[1] - py) < THRESHOLD) {
+          if (isMain) return { type: 'main' };
+          const m = s.name.match(/^Curve #(\d+)/);
+          if (m) return { type: 'mf', id: parseInt(m[1]) };
+        }
+        break; // only check first valid point
       }
-
     }
-
-    return false;
-
+    return null;
   }
 
 
 
   function onMouseDown(e) {
-
-    if (hitTestInitialPoint(e.offsetX, e.offsetY)) {
-
-      dragging = true;
-
+    const hit = hitTestInitialPoint(e.offsetX, e.offsetY);
+    if (hit) {
+      dragging = hit;
       _curveDragging = true;
-
       myChart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: false });
-
       e.event && e.event.preventDefault && e.event.preventDefault();
-
     }
-
   }
 
 
 
   function onMouseMove(e) {
-
     if (!dragging) {
-
-      /* Only set cursor when actually over the point; don't clear it (other handlers manage cursor too) */
-
       if (hitTestInitialPoint(e.offsetX, e.offsetY)) myChart.getDom().style.cursor = 'ns-resize';
-
       return;
-
     }
 
     const py = e.offsetY;
+    let targetParams, targetModel, targetWellsData, targetKey;
 
-    const firstIdx = getFirstFittedIdx();
+    if (dragging.type === 'main') {
+      targetParams = w.params;
+      targetModel = model;
+      targetWellsData = [w];
+      targetKey = 'main';
+    } else {
+      const fits = cardMultiFits[cardId] || [];
+      const mf = fits.find(f => f.id === dragging.id);
+      if (!mf || !mf.params) return;
+      targetParams = mf.params;
+      targetModel = mf.model;
+      targetWellsData = []; // multi-fit is handled differently below
+      targetKey = 'mf_' + mf.id;
+    }
 
-    if (firstIdx < 0) return;
+    // Determine data coordinate at mouse Y
+    // For X, use the current first point's X to stay vertical
+    let firstX;
+    if (dragging.type === 'main') {
+      const firstIdx = getFirstFittedIdx();
+      if (firstIdx < 0) return;
+      firstX = isDate ? parseDateStr(w.x[firstIdx]) : w.x[firstIdx];
+    } else {
+      const fits = cardMultiFits[cardId] || [];
+      const mf = fits.find(f => f.id === dragging.id);
+      if (!mf || !mf.fittedData || mf.fittedData.length === 0) return;
+      firstX = mf.fittedData[0][0];
+    }
 
-    /* X-pixel of the initial point (keep it fixed) */
-
-    const xVal = isDate ? parseDateStr(w.x[firstIdx]) : w.x[firstIdx];
-
-    const ptPx = myChart.convertToPixel('grid', [xVal, 0]);
-
+    const ptPx = myChart.convertToPixel('grid', [firstX, 0]);
     const xPx = ptPx ? ptPx[0] : e.offsetX;
-
-    /* Convert mouse Y → data Y at that X */
-
     const dp = myChart.convertFromPixel('grid', [xPx, py]);
-
     const newQi = dp ? dp[1] : null;
-
     if (!newQi || newQi <= 0) return;
 
-    /* Update qi in the stored data */
+    // Update qi
+    targetParams.qi = Math.round(newQi * 1e6) / 1e6;
 
-    w.params.qi = Math.round(newQi * 1e6) / 1e6;
-
-    /* Recalculate fitted values */
-
-    for (let i = 0; i < w.t.length; i++) {
-
-      if (w.y_fitted[i] != null) w.y_fitted[i] = evalDeclineModel(model, w.t[i], w.params);
-
-    }
-
-    /* Recalculate forecast values */
-
-    if (w.forecast && w.forecast.t) {
-
-      for (let i = 0; i < w.forecast.t.length; i++) {
-
-        w.forecast.y[i] = evalDeclineModel(model, w.forecast.t[i], w.params);
-
+    // Re-evaluate curve
+    if (dragging.type === 'main') {
+      for (let i = 0; i < w.t.length; i++) {
+        if (w.y_fitted[i] != null) w.y_fitted[i] = evalDeclineModel(targetModel, w.t[i], targetParams);
       }
-
+      if (w.forecast && w.forecast.t) {
+        for (let i = 0; i < w.forecast.t.length; i++) {
+          w.forecast.y[i] = evalDeclineModel(targetModel, w.forecast.t[i], targetParams);
+        }
+      }
+      updatePCurveSeries(cardId, myChart, 'main');
+    } else {
+      const fits = cardMultiFits[cardId] || [];
+      const mf = fits.find(f => f.id === dragging.id);
+      if (mf.indices) {
+        mf.fittedData = [];
+        for (const idx of mf.indices) {
+          if (idx < w.t.length) {
+            const yVal = evalDeclineModel(mf.model, w.t[idx], mf.params);
+            mf.fittedData.push([isDate ? parseDateStr(w.x[idx]) : w.x[idx], yVal]);
+          }
+        }
+      }
+      const mfKey = 'mf_' + mf.id;
+      updatePCurveSeries(cardId, myChart, mfKey);
     }
 
-    /* Patch the chart series in-place */
-
+    // Patch chart series
     const opt = myChart.getOption();
-
     const seriesOpt = opt.series;
+    const targetName = dragging.type === 'main' 
+      ? (data.wells.length === 1 ? '' : w.well + ' ') + 'Fitted'
+      : 'Curve #' + dragging.id + ' (' + targetModel + ')';
 
     for (let si = 0; si < seriesOpt.length; si++) {
-
       const s = seriesOpt[si];
-
-      if (!s.name) continue;
-
-      if (s.name.endsWith('Fitted')) {
-
-        /* Rebuild combined fitted + forecast data */
-
-        let combinedData = isDate
-
-          ? w.x.map((xv, i) => [parseDateStr(xv), w.y_fitted[i]]).filter(p => p[1] != null)
-
-          : w.x.map((xv, i) => [xv, w.y_fitted[i]]).filter(p => p[1] != null);
-
-        if (w.forecast && w.forecast.x) {
-
-          for (let i = 0; i < w.forecast.x.length; i++) {
-
-            const xv = isDate ? parseDateStr(w.forecast.x[i]) : w.forecast.x[i];
-
-            combinedData.push([xv, w.forecast.y[i]]);
-
+      if (s.name === targetName || (dragging.type === 'main' && s.name && s.name.endsWith('Fitted') && !s.name.startsWith('_'))) {
+        if (dragging.type === 'main') {
+          let combinedData = w.x.map((xv, i) => [isDate ? parseDateStr(xv) : xv, w.y_fitted[i]]).filter(p => p[1] != null);
+          if (w.forecast && w.forecast.x) {
+            w.forecast.x.forEach((xv, i) => combinedData.push([isDate ? parseDateStr(xv) : xv, w.forecast.y[i]]));
           }
-
+          seriesOpt[si].data = combinedData;
+        } else {
+          const fits = cardMultiFits[cardId] || [];
+          const mf = fits.find(f => f.id === dragging.id);
+          seriesOpt[si].data = mf.fittedData || [];
+          // Note: dynamic forecast for mf is handled in next major render, or we could rebuild here
         }
-
-        seriesOpt[si].data = combinedData;
-
       }
-
     }
 
     myChart.setOption({ series: seriesOpt }, false);
-
-    /* Update P10/P90 curves if enabled (they depend on qi) */
-
-    updatePCurveSeries(cardId, myChart, 'main');
-
-    /* Live-update the % change graphic labels (P50 changed) */
     updatePctChangeGraphic(cardId, myChart);
-
-    /* Update formula display */
-
     updateQiDisplay(cardId);
-
     e.event && e.event.preventDefault && e.event.preventDefault();
-
   }
 
 
 
   function onMouseUp() {
-
     if (dragging) {
-
       dragging = false;
-
       _curveDragging = false;
-
       myChart.getDom().style.cursor = '';
 
-      /* Also sync the other chart (mini ↔ full view) */
+      // Force a full re-render to sync tables (All Curves panel) and other views
+      saveZoomState(cardId);
+      renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
 
       const fullId = 'fullChart-' + cardId;
-
       const otherChart = myChart === chartInstances[fullId] ? chartInstances[cardId] : chartInstances[fullId];
-
       if (otherChart) {
-
-        const seriesSync = myChart.getOption().series;
-
-        otherChart.setOption({ series: seriesSync }, false);
-
-        updatePCurveSeries(cardId, otherChart, 'main');
-
+        renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
       }
-
     }
-
   }
 
 
@@ -5256,6 +5235,8 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
   const chartTitle = customTitle || (isSingle ? firstW.well : allWellsData.map(w => w.well).join(', '));
+  const collTitleEl = document.getElementById('collapsedTitle-' + cardId);
+  if (collTitleEl) collTitleEl.textContent = chartTitle || 'Plot Card';
 
   const customLabels = cardAxisLabels[cardId] || {};
 
@@ -5323,10 +5304,18 @@ function renderSingleChart(cardId, data, forecastMonths) {
         header = isDate ? '<b>' + formatDateTs(xVal) + '</b>' : '<b>' + xVal + '</b>';
 
         params.forEach(p => {
-          if (p && !p.seriesName.endsWith('_bridge') && !p.seriesName.startsWith('_')) {
-            let val = Array.isArray(p.data) ? p.data[1] : p.data;
-            if (val != null) {
-              header += '<br/>' + p.marker + ' ' + p.seriesName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
+          if (p && !p.seriesName.endsWith('_bridge')) {
+            let sName = p.seriesName;
+            let isHidden = sName.startsWith('_');
+            let isForecast = sName.includes('Forecast');
+            
+            // Show if it's not hidden, OR if it is a hidden forecast series
+            if (!isHidden || isForecast) {
+              let val = Array.isArray(p.data) ? p.data[1] : p.data;
+              if (val != null) {
+                let displayName = isHidden ? sName.substring(1) : sName;
+                header += '<br/>' + p.marker + ' ' + displayName + ': <b>' + (typeof val === 'number' ? val.toFixed(2) : val) + '</b>';
+              }
             }
           }
         });
@@ -9944,13 +9933,28 @@ async function fcRunPreview() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'Formula error');
 
-    const vals = data.preview || [];
-    let html = '<table class="fc-result-table"><thead><tr><th>Row</th><th>Result</th></tr></thead><tbody>';
-    vals.forEach((v, i) => {
+    const rows = data.preview || [];
+    if (rows.length === 0) {
+      body.innerHTML = '<span class="fc-live-empty">No preview data</span>';
+      return;
+    }
+
+    const cols = Object.keys(rows[0]).filter(c => c !== 'RESULT');
+    
+    let html = '<div style="width:100%; overflow-x:auto;">';
+    html += '<table class="fc-result-table"><thead><tr><th>Row</th>';
+    cols.forEach(c => html += `<th>${c}</th>`);
+    html += '<th>Result</th></tr></thead><tbody>';
+
+    rows.forEach((row, i) => {
+      html += `<tr><td>${i + 1}</td>`;
+      cols.forEach(c => html += `<td>${row[c]}</td>`);
+      
+      const v = row['RESULT'];
       const fmt = (typeof v === 'number') ? v.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(v);
-      html += `<tr><td>${i + 1}</td><td class="fc-result-val">${fmt}</td></tr>`;
+      html += `<td class="fc-result-val">${fmt}</td></tr>`;
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     body.innerHTML = html;
 
     badge.textContent = 'Valid ✓';

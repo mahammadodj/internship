@@ -1356,18 +1356,29 @@ async def preview_formula(body: FormulaPreview):
     if _current_df is None:
         raise HTTPException(404, "No dataset loaded.")
     try:
-        result = _current_df.head(5).eval(body.formula)
-        values = result.fillna("").tolist() if hasattr(result, 'fillna') else [result] * 5
-        # Convert numpy types to native Python
-        clean = []
-        for v in values:
-            if isinstance(v, (np.integer,)):
-                clean.append(int(v))
-            elif isinstance(v, (np.floating,)):
-                clean.append(float(v))
-            else:
-                clean.append(v)
-        return {"ok": True, "preview": clean}
+        # Evaluate on the full DF to ensure aggregations (SUM, MEAN, etc.) are correct
+        full_result = _current_df.eval(body.formula)
+        
+        df_head = _current_df.head(5).copy()
+        
+        if isinstance(full_result, pd.Series):
+            df_head['RESULT'] = full_result.iloc[:5]
+        elif np.isscalar(full_result):
+            df_head['RESULT'] = full_result
+        else:
+            # Handle other types (like numpy arrays)
+            try:
+                df_head['RESULT'] = full_result[:5]
+            except Exception:
+                df_head['RESULT'] = full_result
+
+        for col in _date_columns:
+            if col in df_head.columns and pd.api.types.is_datetime64_any_dtype(df_head[col]):
+                df_head[col] = df_head[col].dt.strftime('%d.%m.%Y').fillna("")
+
+        # Handle NaNs and return as list of dicts
+        preview_data = df_head.fillna("").to_dict(orient="records")
+        return {"ok": True, "preview": preview_data}
     except Exception as e:
         raise HTTPException(400, f"Formula error: {e}")
 

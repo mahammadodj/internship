@@ -880,20 +880,68 @@ button.btn-sm {
   margin-bottom: 16px;
 }
 
-.plot-remove {
+.plot-remove, .plot-collapse {
   position: absolute;
   top: 16px;
-  right: 16px;
   background: transparent;
   border: none;
   color: var(--text-dim);
   cursor: pointer;
   font-size: 1.2rem;
   line-height: 1;
+  transition: color 0.2s;
+  z-index: 10;
+}
+
+.plot-remove {
+  right: 16px;
+}
+
+.plot-collapse {
+  right: 44px;
 }
 
 .plot-remove:hover {
   color: var(--red);
+}
+
+.plot-collapse:hover {
+  color: var(--accent);
+}
+
+.plot-card.collapsed {
+  padding-bottom: 12px;
+}
+
+.plot-card.collapsed .plot-header,
+.plot-card.collapsed .style-panel,
+.plot-card.collapsed .chart-area,
+.plot-card.collapsed .excl-hint,
+.plot-card.collapsed .curve-summary-wrap,
+.plot-card.collapsed .multi-fit-panel,
+.plot-card.collapsed .formula-display,
+.plot-card.collapsed .qi-box,
+.plot-card.collapsed .qi-input-panel,
+.plot-card.collapsed .dca-stats-summary,
+.plot-card.collapsed div[id^="forecastTableSection-"] {
+  display: none !important;
+}
+
+.plot-card-collapsed-header {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.plot-card.collapsed .plot-card-collapsed-header {
+  display: flex;
+}
+
+.collapsed-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 0.95rem;
 }
 
 .mini-chart {
@@ -3279,7 +3327,7 @@ button.btn-sm {
   gap: 6px;
 }
 
-.fc-fn-group {}
+
 
 .fc-fn-cat {
   font-size: .62rem;
