@@ -1,4 +1,4 @@
-﻿/* ====================================================================
+/* ====================================================================
 
    DCA Pro – Application JavaScript
 
@@ -1408,7 +1408,7 @@ function showPageNameModal(title, defaultVal, onConfirm) {
 
 function deletePage(pageId) {
 
-  if (pages.length <= 1) { alert('Cannot delete the last page.'); return; }
+  if (pages.length <= 1) { customAlert('Cannot delete the last page.'); return; }
 
   if (!confirm('Delete this page and all its plots?')) return;
 
@@ -1623,14 +1623,14 @@ function populateAllCardColumnSelectors() {
 
 function addPlotCardToActive() {
   if (uploadedColumns.length === 0) {
-    alert('Please upload a dataset first.');
+    customAlert('Please upload a dataset first.');
     return;
   }
   // Prevent adding a new card if any existing card has no plot yet
   const existingCards = container.querySelectorAll('.plot-card');
   for (const c of existingCards) {
     if (!chartInstances[c.id]) {
-      alert('Please create a plot for the existing card before adding a new one.');
+      customAlert('Please create a plot for the existing card before adding a new one.');
       c.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
@@ -2747,7 +2747,7 @@ async function runSingleDCA(cardId) {
 
   const combineAgg = getCombineAggMode(cardId);
 
-  if (!well) { alert('Please select at least one well.'); return; }
+  if (!well) { customAlert('Please select at least one well.'); return; }
 
   // If there are pending Ctrl-selected points, auto-include them (remove from exclusions)
   // so that "select more points → click Plot" naturally adds them to the fit
@@ -2763,7 +2763,7 @@ async function runSingleDCA(cardId) {
   const yVal = card.querySelector('.p-selY')?.value || '';
   const wellCol = card.querySelector('.p-selWellCol')?.value || '';
   const groupCol = card.querySelector('.p-groupCol')?.value || '';
-  if (!xVal || !yVal || !wellCol) { alert('Please select X Axis, Y Axis, and Well Column on this card.'); return; }
+  if (!xVal || !yVal || !wellCol) { customAlert('Please select X Axis, Y Axis, and Well Column on this card.'); return; }
 
   const btn = card.querySelector('.btn');
 
@@ -2808,6 +2808,10 @@ async function runSingleDCA(cardId) {
     cardStyles[cardId] = readCardStyles(cardId);
 
     /* Re-insert saved Qi anchor points into fresh data, then refit */
+    if (cardZoomState[cardId]) {
+      delete cardZoomState[cardId].xMax;
+    }
+
     if (savedAnchors.length > 0 && data.wells && data.wells.length === 1) {
       const w = data.wells[0];
       const isDate = w.is_date || false;
@@ -2847,7 +2851,7 @@ async function runSingleDCA(cardId) {
       renderSingleChart(cardId, data, months);
     }
 
-  } catch (err) { alert(err.message); }
+  } catch (err) { customAlert(err.message); }
 
   finally { btn.innerHTML = 'Plot'; btn.disabled = false; }
 
@@ -2886,13 +2890,13 @@ function toggleExclusion(cardId, index) {
 function openFullView(cardId) {
   const data = cardLastData[cardId];
   if (!data) {
-    alert("Please generate the plot first!");
+    customAlert("Please generate the plot first!");
     return;
   }
 
   const existingChart = chartInstances[cardId];
   if (!existingChart) {
-    alert("Chart instance not found.");
+    customAlert("Chart instance not found.");
     return;
   }
 
@@ -5293,7 +5297,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
   const dzBottom = axPos.x === 'top' ? (isDate ? 8 : 4) : (isDate ? 8 : 4);
 
   const option = {
-
+    animation: false,
     backgroundColor: 'transparent',
 
     graphic: graphicElems,
@@ -7498,7 +7502,7 @@ function downloadChart(cardId, format) {
 
     } catch (e) {
 
-      alert('PDF export failed. jsPDF library may not be loaded.');
+      customAlert('PDF export failed. jsPDF library may not be loaded.');
 
     }
 
@@ -8473,6 +8477,9 @@ async function refitCurrentData(cardId) {
     }
 
     saveZoomState(cardId);
+    if (cardZoomState[cardId]) {
+      delete cardZoomState[cardId].xMax;
+    }
     renderSingleChart(cardId, data, forecastMonths);
     if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
   } catch (e) {
@@ -10120,7 +10127,7 @@ async function doDeleteColumn() {
 
     showNotification(`Column "${col}" deleted`);
 
-  } catch (e) { alert(e.message); }
+  } catch (e) { customAlert(e.message); }
 
 }
 
@@ -10146,7 +10153,7 @@ async function exportCSV() {
 
     a.click();
 
-  } catch (e) { alert(e.message); }
+  } catch (e) { customAlert(e.message); }
 
 }
 
@@ -10404,7 +10411,7 @@ async function loadWorkspaceFromFile() {
       /* Trigger auto-save so the loaded state is persisted to IDB */
       _debouncedAutoSave();
 
-    } catch (e) { alert('Failed to load workspace: ' + e.message); }
+    } catch (e) { customAlert('Failed to load workspace: ' + e.message); }
 
   };
 
@@ -10482,7 +10489,7 @@ async function reloadData() {
 
     showToast('Data reloaded', 'success');
 
-  } catch (e) { alert(e.message); }
+  } catch (e) { customAlert(e.message); }
 
 }
 
@@ -10537,6 +10544,36 @@ function showToast(msg, type = 'info', duration = 3500) {
 // Backward-compat wrapper
 
 function showNotification(msg) { showToast(msg, 'success'); }
+
+
+
+/**
+ * Custom alternative to window.alert() using the app's modal system.
+ * @param {string} msg - The message to display.
+ * @param {string} title - Optional title.
+ */
+function customAlert(msg, title = 'Attention') {
+  const mc = document.getElementById('modalContainer');
+  if (!mc) return;
+
+  mc.innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)this.remove()">
+      <div class="modal" style="text-align:center;animation: modalFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;">
+        <div style="font-size: 3rem; margin-bottom: 20px; line-height: 1; display: flex; justify-content: center; opacity: 0.9;">
+          <svg viewBox="0 0 24 24" width="48" height="48" style="stroke: #00bcd4; fill: none; stroke-width: 1.5;">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+        </div>
+        <p style="font-size:1.05rem; margin-bottom:32px; line-height:1.6; color:var(--text); font-weight: 500;">${msg}</p>
+        <div class="modal-actions" style="justify-content:center;">
+          <button class="btn modal-btn-cyan" style="min-width:120px; padding: 12px 24px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 188, 212, 0.3);" onclick="this.closest('.modal-overlay').remove()">OK</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 
 
@@ -11543,7 +11580,7 @@ function copyColumnValues(col, scope) {
   if (values.length > 0) {
     navigator.clipboard.writeText(values.join('\n')).then(() => {
       showNotification(`Copied ${values.length} values from column "${col}"`);
-    }).catch(err => alert('Failed to copy: ' + err));
+    }).catch(err => customAlert('Failed to copy: ' + err));
   } else {
     showNotification('No values to copy');
   }
@@ -11578,7 +11615,7 @@ async function doDeleteColumnByName(col) {
     loadEditorPage(editorPage);
     renderDerivedColumnsPanel();
     showNotification(`Column "${col}" deleted`);
-  } catch (e) { alert(e.message); }
+  } catch (e) { customAlert(e.message); }
 }
 
 
@@ -12659,7 +12696,7 @@ async function loadWorkspace() {
         populateSelectors();
         const msg = 'Server restarted \u2013 please re-import your data file. Your dashboard layout has been preserved.';
         if (typeof showToast === 'function') showToast(msg, 'warning', 6000);
-        else alert(msg);
+        else customAlert(msg);
       }
     }
 

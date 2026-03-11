@@ -816,9 +816,11 @@ async def decline_curve_analysis(
         raise HTTPException(status_code=400, detail="Invalid combine_func. Use sum|mean|median|min|max")
 
     # ---- Combine mode: aggregate y-values across selected wells by time ----
+    cols_to_extract = list(dict.fromkeys([x, y]))
+
     if combine and len(well_list) > 1:
         masks = _current_df[well_col].astype(str).isin(well_list)
-        combined = _current_df.loc[masks, [x, y]].dropna().copy()
+        combined = _current_df.loc[masks, cols_to_extract].dropna().copy()
         combined[y] = pd.to_numeric(combined[y], errors='coerce').fillna(0.0)
         combined = combined.groupby(x, sort=True)[y].agg(agg_func).reset_index()
         combined = combined.sort_values(x).reset_index(drop=True)
@@ -838,12 +840,12 @@ async def decline_curve_analysis(
             # Group-by mode: filter rows where group_col matches the selected value,
             # then aggregate y by x using the chosen aggregation function.
             mask = _current_df[group_col_name].astype(str) == well_name
-            grp = _current_df.loc[mask, [x, y]].dropna().copy()
+            grp = _current_df.loc[mask, cols_to_extract].dropna().copy()
             grp[y] = pd.to_numeric(grp[y], errors='coerce').fillna(0.0)
             subset = grp.groupby(x, sort=True)[y].agg(agg_func).reset_index()
         else:
             mask = _current_df[well_col].astype(str) == well_name
-            subset = _current_df.loc[mask, [x, y]].dropna().copy()
+            subset = _current_df.loc[mask, cols_to_extract].dropna().copy()
 
         # Sort by x column
         subset = subset.sort_values(x).reset_index(drop=True)

@@ -1,4 +1,4 @@
-﻿/* ====================================================================
+/* ====================================================================
    DCA Pro – Performance & Industrial Aesthetics
    ==================================================================== */
 
@@ -415,10 +415,11 @@ td {
   border-color: var(--accent);
 }
 
-font-size: .72rem;
-font-weight: 400;
-color: var(--text-dim);
-margin-left: 4px;
+.foundry-row-info {
+  font-size: .72rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: 4px;
 }
 
 .foundry-toolbar-right {
@@ -1206,8 +1207,11 @@ button.btn-sm {
   margin-bottom: 2px;
 }
 
-color: var(--text-muted);
-text-transform: uppercase;
+.style-subtitle {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  font-weight: 600;
 }
 
 .style-controls-group {
@@ -2116,13 +2120,30 @@ text-transform: uppercase;
   justify-content: center;
 }
 
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .modal {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  min-width: 360px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, .4);
+  border-radius: 8px;
+  padding: 32px;
+  min-width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, .5);
+  position: relative;
+  z-index: 3001;
+}
+
+.modal-btn-cyan {
+  background: #00bcd4 !important;
+  color: #fff !important;
+}
+
+.modal-btn-cyan:hover {
+  background: #00acc1 !important;
 }
 
 .modal h3 {
