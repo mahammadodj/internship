@@ -428,13 +428,16 @@ async function handleFileWithObj(file) {
 
     // Step 1: Initialize upload — get dataset_id
 
+    const hrInput = document.getElementById('headerRowInput');
+    const hrVal = hrInput && hrInput.value !== '' ? parseInt(hrInput.value, 10) : null;
+
     const initRes = await fetch('/api/upload/init', {
 
       method: 'POST',
 
       headers: { 'Content-Type': 'application/json' },
 
-      body: JSON.stringify({ filename: file.name, file_size: file.size })
+      body: JSON.stringify({ filename: file.name, file_size: file.size, header_row: hrVal })
 
     });
 

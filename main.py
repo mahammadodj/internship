@@ -210,14 +210,37 @@ def _persist_current_df():
         print(f"Warning: Could not persist DataFrame to parquet: {e}")
 
 
-def _parse_data(raw_bytes: bytes, suffix: str):
+def _parse_data(raw_bytes: bytes, suffix: str, header_row: int = None):
     """Parse raw file bytes and auto-detect date columns (dayfirst=True)."""
+    if header_row is None:
+        try:
+            if suffix == ".csv":
+                df_temp = pd.read_csv(io.BytesIO(raw_bytes), header=None, nrows=30)
+            elif suffix in (".xlsx", ".xls"):
+                df_temp = pd.read_excel(io.BytesIO(raw_bytes), engine="openpyxl", header=None, nrows=30)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported file type.")
+            
+            best_row = 0
+            max_valid = 0
+            for i in range(len(df_temp)):
+                valid_count = df_temp.iloc[i].notna().sum()
+                if valid_count > max_valid:
+                    max_valid = valid_count
+                    best_row = i
+            header_row = best_row
+        except Exception:
+            header_row = 0
+            
     if suffix == ".csv":
-        df = pd.read_csv(io.BytesIO(raw_bytes))
+        df = pd.read_csv(io.BytesIO(raw_bytes), header=header_row)
     elif suffix in (".xlsx", ".xls"):
-        df = pd.read_excel(io.BytesIO(raw_bytes), engine="openpyxl")
+        df = pd.read_excel(io.BytesIO(raw_bytes), engine="openpyxl", header=header_row)
     else:
         raise HTTPException(status_code=400, detail="Unsupported file type.")
+    
+    # Ensure all column names are strings
+    df.columns = df.columns.astype(str)
 
     detected_dates = []
     for col in df.columns:
@@ -425,6 +448,7 @@ CHUNK_SIZE = 5 * 1024 * 1024  # 5 MB default; frontend can send smaller
 class UploadInitRequest(BaseModel):
     filename: str
     file_size: int
+    header_row: Optional[int] = None
 
 
 def _background_parse_and_convert(dataset_id: str):
@@ -447,7 +471,8 @@ def _background_parse_and_convert(dataset_id: str):
         ds["progress"] = 30
 
         # Parse into DataFrame
-        df, detected_dates = _parse_data(raw_bytes, suffix)
+        header_row = ds.get("header_row")
+        df, detected_dates = _parse_data(raw_bytes, suffix, header_row=header_row)
         ds["progress"] = 60
 
         # Convert to Parquet
@@ -550,6 +575,7 @@ async def upload_init(req: UploadInitRequest):
         "filename": req.filename,
         "suffix": suffix,
         "file_size": req.file_size,
+        "header_row": req.header_row,
         "raw_path": str(raw_path),
         "parquet_path": None,
         "error": None,
@@ -853,26 +879,29 @@ async def decline_curve_analysis(
         if len(subset) < 3:
             continue
 
-        # Build numeric t for curve fitting
-        if is_date:
-            x_dates = subset[x]
-            x_min = x_dates.min()
-            t = (x_dates - x_min).dt.total_seconds().values / 86400.0
-            # Display strings in DD.MM.YYYY format
-            x_display = x_dates.dt.strftime('%d.%m.%Y').tolist()
-        else:
-            x_numeric = pd.to_numeric(subset[x], errors='coerce').fillna(0.0).values.astype(float)
-            t = x_numeric - x_numeric.min()
-            x_display = x_numeric.tolist()
-            x_min = None
-
-        y_vals = pd.to_numeric(subset[y], errors='coerce').fillna(0.0).values.astype(float)
-
         # Parse exclude indices (indices in sorted order)
         excl = set()
         if exclude_indices:
             excl = {int(i) for i in exclude_indices.split(",") if i.strip().isdigit()}
-        fit_mask = np.array([i not in excl for i in range(len(t))])
+
+        fit_mask = np.array([i not in excl for i in range(len(subset))])
+
+        # Build numeric t for curve fitting based on FIRST INCLUDED point
+        if is_date:
+            x_dates = subset[x]
+            x_min_val = x_dates[fit_mask].min() if np.any(fit_mask) else x_dates.min()
+            t = (x_dates - x_min_val).dt.total_seconds().values / 86400.0
+            # Display strings in DD.MM.YYYY format
+            x_display = x_dates.dt.strftime('%d.%m.%Y').tolist()
+        else:
+            x_numeric = pd.to_numeric(subset[x], errors='coerce').fillna(0.0).values.astype(float)
+            x_min_numeric = x_numeric[fit_mask].min() if np.any(fit_mask) else x_numeric.min()
+            t = x_numeric - x_min_numeric
+            x_display = x_numeric.tolist()
+            x_min_val = None
+
+        y_vals = pd.to_numeric(subset[y], errors='coerce').fillna(0.0).values.astype(float)
+
         t_fit = t[fit_mask]
         y_fit = y_vals[fit_mask]
 
@@ -932,13 +961,13 @@ async def decline_curve_analysis(
 
             if is_date:
                 # Convert back to timestamp strings
-                # t was (date - min_date).days
-                # So new_date = min_date + t_forecast
-                start_date = pd.to_datetime(subset[x].min())
+                # t was (date - x_min_val).days
+                # So new_date = x_min_val + t_forecast
+                start_date = pd.to_datetime(x_min_val)
                 forecast_dates = [start_date + pd.Timedelta(days=v) for v in t_forecast]
                 x_fore_display = [d.strftime('%d.%m.%Y') for d in forecast_dates]
             else:
-                x_fore_display = (t_forecast + x_numeric.min()).tolist()
+                x_fore_display = (t_forecast + x_min_numeric).tolist()
 
             forecast_data = {
                 "x": x_fore_display,
