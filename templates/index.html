@@ -351,13 +351,30 @@
   </div>
 
   <!-- Line Color Picker Popup -->
-  <div class="ccm-popup" id="lineColorPopup">
-    <div class="ccm-popup-title">Line Color</div>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <input type="color" id="lineColorInput" value="#ff0000">
-      <button class="btn btn-sm" id="lineColorOk" style="padding:3px 10px;">Apply</button>
-      <button class="btn btn-outline btn-sm" id="lineColorDel"
-        style="padding:3px 10px;color:var(--red);border-color:var(--red);">Delete</button>
+  <!-- User Line Style Popup -->
+  <div class="ccm-popup" id="lineColorPopup" style="width:220px;padding:12px;">
+    <div class="ccm-popup-title">Line Style</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:.7rem;color:var(--text-dim);">Color</span>
+        <input type="color" id="lineColorInput" title="Line Color" style="height:24px;width:40px;padding:0;border:none;background:none;cursor:pointer;">
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:.7rem;color:var(--text-dim);">Thickness</span>
+        <input type="range" id="lineThicknessInput" min="1" max="10" step="1" title="Line Thickness" style="width:80px;">
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:.7rem;color:var(--text-dim);">Style</span>
+        <select id="lineStyleInput" title="Line Style" style="font-size:.7rem;padding:2px;background:var(--bg-input);border:1px solid var(--border);color:var(--text);border-radius:3px;">
+          <option value="solid">Solid</option>
+          <option value="dashed">Dashed</option>
+          <option value="dotted">Dotted</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button class="btn btn-sm btn-primary" id="lineColorOk" style="flex:1;padding:4px;">Apply</button>
+        <button class="btn btn-outline btn-sm" id="lineColorDel" style="flex:1;padding:4px;color:var(--red);border-color:var(--red);">Delete</button>
+      </div>
     </div>
   </div>
 

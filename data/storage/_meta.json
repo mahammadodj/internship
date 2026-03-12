@@ -1,9 +1,11 @@
 {
-  "active_dataset_id": "d516a84abc28",
-  "filename": "AZNEFT_PROD_GUN.xlsx",
-  "date_columns": [],
-  "last_import_timestamp": "2026-03-12T07:50:49.250463+00:00",
-  "file_disk_path": null,
+  "active_dataset_id": "8b3d409e0f10",
+  "filename": "rates.csv",
+  "date_columns": [
+    "date"
+  ],
+  "last_import_timestamp": "2026-03-12T12:51:02.343977+00:00",
+  "file_disk_path": "C:\\Users\\MahammadOjagzada\\OneDrive - EiGroup\\Desktop\\Private\\internship\\Decline-Curve-Analysis-web-application\\rates.csv",
   "active_version": 1,
   "derived_columns": {
     "2c9e793f1209": []

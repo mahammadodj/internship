@@ -1847,7 +1847,10 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
       <div class="curve-summary-wrap" id="curveSummaryWrap-${cardId}" style="display:none;">
         <div class="curve-summary-header">
           <span class="curve-summary-title">Curve Summary</span>
-          <button class="curve-summary-clear-btn" onclick="clearAllCurvesFromPanel('${cardId}')" title="Remove all curves">Remove All</button>
+          <div style="display:flex;gap:6px;">
+            <button class="curve-summary-download-btn" onclick="downloadCurveSummaryCSV('${cardId}')" title="Download summary as CSV">Download CSV</button>
+            <button class="curve-summary-clear-btn" onclick="clearAllCurvesFromPanel('${cardId}')" title="Remove all curves">Remove All</button>
+          </div>
         </div>
         <div class="curve-summary-table-wrap" id="curveSummary-${cardId}"></div>
       </div>
@@ -2111,7 +2114,7 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
 function getDefaultStyles() {
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-  return { plotTheme: 'classic', actualColor: '#2563eb', actualSymbol: 'triangle', actualSize: 14, fittedColor: '#d97706', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedLabels: false, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#059669', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#059669', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p10Symbol: 'circle', p10SymbolSize: 6, p90Color: '#dc2626', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, p90Symbol: 'circle', p90SymbolSize: 6, gridX: true, gridY: true, headerFontSize: 2.1, headerColor: isLight ? '#000000' : '#ffffff', headerFontWeight: 'normal', headerTextAlign: 'center', diDecimals: 4 };
+  return { plotTheme: 'classic', actualColor: '#2563eb', actualSymbol: 'triangle', actualSize: 14, fittedColor: '#d97706', fittedStyle: 'solid', fittedWidth: 2, fittedMarkers: true, fittedLabels: false, fittedSymbol: 'triangle', fittedSymbolSize: 14, forecastColor: '#059669', forecastStyle: 'dashed', forecastWidth: 3, forecastMarkers: true, forecastLabels: false, forecastSymbol: 'triangle', forecastSymbolSize: 14, p10Color: '#22c55e', p10Style: 'solid', p10Line: true, p10Marker: true, p10Labels: false, p10Symbol: 'circle', p10SymbolSize: 6, p90Color: '#ef4444', p90Style: 'solid', p90Line: true, p90Marker: true, p90Labels: false, p90Symbol: 'circle', p90SymbolSize: 6, gridX: true, gridY: true, headerFontSize: 2.1, headerColor: isLight ? '#000000' : '#ffffff', headerFontWeight: 'normal', headerTextAlign: 'center', diDecimals: 4 };
 }
 
 /* Build per-curve style HTML sections inside the style panel.
@@ -2268,7 +2271,7 @@ function rebuildCurveStyleSections(cardId) {
     const mfLineStyle = ms.lineStyle || stored.fittedStyle || defaults.fittedStyle;
     const mfLine = ms.showLine != null ? ms.showLine : true;
     const mfWidth = ms.lineWidth != null ? ms.lineWidth : (stored.fittedWidth != null ? stored.fittedWidth : defaults.fittedWidth);
-    const mfP10Color = ms.p10Color || mfColor;
+    const mfP10Color = ms.p10Color || stored.p10Color || defaults.p10Color;
     const mfP10Line = ms.p10Line != null ? ms.p10Line : (stored.p10Line != null ? stored.p10Line : defaults.p10Line);
     const mfP10Marker = ms.p10Marker != null ? ms.p10Marker : (stored.p10Marker != null ? stored.p10Marker : defaults.p10Marker);
     const mfP10Labels = ms.p10Labels != null ? ms.p10Labels : (stored.p10Labels != null ? stored.p10Labels : defaults.p10Labels);
@@ -2276,7 +2279,7 @@ function rebuildCurveStyleSections(cardId) {
     const mfP10Symbol = ms.p10Symbol || stored.p10Symbol || defaults.p10Symbol;
     const mfP10SymbolSize = ms.p10SymbolSize != null ? ms.p10SymbolSize : (stored.p10SymbolSize != null ? stored.p10SymbolSize : defaults.p10SymbolSize);
 
-    const mfP90Color = ms.p90Color || mfColor;
+    const mfP90Color = ms.p90Color || stored.p90Color || defaults.p90Color;
     const mfP90Line = ms.p90Line != null ? ms.p90Line : (stored.p90Line != null ? stored.p90Line : defaults.p90Line);
     const mfP90Marker = ms.p90Marker != null ? ms.p90Marker : (stored.p90Marker != null ? stored.p90Marker : defaults.p90Marker);
     const mfP90Labels = ms.p90Labels != null ? ms.p90Labels : (stored.p90Labels != null ? stored.p90Labels : defaults.p90Labels);
@@ -2583,14 +2586,14 @@ function readCardStyles(cardId) {
       markerSymbol: q('sc-mf-symbol')?.value || 'triangle',
       markerSize: parseInt(q('sc-mf-msize')?.value || '14'),
       showLabels: q('sc-mf-labels')?.checked || false,
-      p10Color: q('sc-mf-p10-color')?.value || '#8b5cf6',
+      p10Color: q('sc-mf-p10-color')?.value || '#22c55e',
       p10Line: q('sc-mf-p10-line')?.checked !== false,
       p10Marker: q('sc-mf-p10-marker')?.checked || false,
       p10Labels: q('sc-mf-p10-labels')?.checked || false,
       p10Style: q('sc-mf-p10-style')?.value || 'dotted',
       p10Symbol: q('sc-mf-p10-symbol')?.value || 'circle',
       p10SymbolSize: parseInt(q('sc-mf-p10-msize')?.value || '6'),
-      p90Color: q('sc-mf-p90-color')?.value || '#8b5cf6',
+      p90Color: q('sc-mf-p90-color')?.value || '#ef4444',
       p90Line: q('sc-mf-p90-line')?.checked !== false,
       p90Marker: q('sc-mf-p90-marker')?.checked || false,
       p90Labels: q('sc-mf-p90-labels')?.checked || false,
@@ -5185,17 +5188,21 @@ function renderSingleChart(cardId, data, forecastMonths) {
     series.push({
 
       name: ul.name, type: 'line', data: [],
-
+      z: 10,
       markLine: {
-
+        z: 10,
         silent: false, symbol: ['none', 'none'],
 
-        lineStyle: { color: ul.color, type: 'solid', width: 2 },
+        lineStyle: { color: ul.color, type: ul.lineStyle || 'solid', width: ul.lineWidth || 2 },
 
         label: { show: true, formatter: ul.name, color: ul.color, fontSize: 11, position: ul.type === 'h' ? 'insideStartTop' : 'insideEndTop' },
 
-        data: [mlDataItem]
-
+        data: [{ ...mlDataItem, name: ul.name }],
+        emphasis: {
+          lineStyle: { width: (ul.lineWidth || 2) + 2 },
+          label: { show: true, fontWeight: 'bold' }
+        },
+        cursor: 'pointer'
       },
 
       itemStyle: { color: ul.color }, lineStyle: { color: ul.color }
@@ -5671,9 +5678,16 @@ function renderSingleChart(cardId, data, forecastMonths) {
     const actualLen = firstW.x.length;
 
     myChart.on('click', function (params) {
+      /* Handle user line clicks */
+      if (params.componentType === 'markLine') {
+        const lineName = params.name || params.seriesName;
+        const lines = cardUserLines[cardId] || [];
+        const line = lines.find(l => l.name === lineName);
+        if (line) showLineStylePicker(cardId, line, params.event);
+        return;
+      }
 
       /* Handle annotation clicks */
-
       if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
 
         if (_annDragSuppressClick) return;
@@ -5733,6 +5747,14 @@ function renderSingleChart(cardId, data, forecastMonths) {
     /* Multi-well mode: handle annotation clicks + style section highlight */
 
     myChart.on('click', function (params) {
+      /* Handle user line clicks */
+      if (params.componentType === 'markLine') {
+        const lineName = params.name || params.seriesName;
+        const lines = cardUserLines[cardId] || [];
+        const line = lines.find(l => l.name === lineName);
+        if (line) showLineStylePicker(cardId, line, params.event);
+        return;
+      }
 
       if (params.componentType === 'markPoint' && params.name && params.name.startsWith('ann_')) {
 
@@ -6263,6 +6285,60 @@ function renderCurveSummaryTable(cardId, data) {
     + '</tr></thead><tbody>' + htmlRows + '</tbody></table>';
 
   wrap.style.display = 'block';
+  wrap._lastRows = rows;
+}
+
+function downloadCurveSummaryCSV(cardId) {
+  const wrap = document.getElementById('curveSummaryWrap-' + cardId);
+  if (!wrap || !wrap._lastRows || wrap._lastRows.length === 0) {
+    showToast('No summary data available to download.', 'warning');
+    return;
+  }
+
+  const rows = wrap._lastRows;
+  const headers = [
+    'Curve', 'Model', 'Formula', 'R2', 'Qi', 'Di', 'Fcst Pts',
+    'Fcst First', 'Fcst Last', 'Fcst Delta', 'Fcst Pct',
+    'Series First', 'Series Last', 'Series Delta', 'Series Pct'
+  ];
+
+  const csvContent = [
+    headers.join(','),
+    ...rows.map(r => {
+      const fc = r.fcStats || {};
+      const ss = r.seriesStats || {};
+      const rowData = [
+        `"${r.curve}"`,
+        `"${r.model}"`,
+        `"${r.formula.replace(/"/g, '""')}"`,
+        r.r2 !== null ? r.r2.toFixed(6) : '',
+        r.qi !== null ? r.qi.toFixed(6) : '',
+        r.di !== null ? r.di.toFixed(8) : '',
+        r.forecastPoints || 0,
+        fc.first !== undefined ? fc.first.toFixed(4) : '',
+        fc.last !== undefined ? fc.last.toFixed(4) : '',
+        fc.delta !== undefined ? fc.delta.toFixed(4) : '',
+        fc.pct !== undefined ? fc.pct.toFixed(2) + '%' : '',
+        ss.first !== undefined ? ss.first.toFixed(4) : '',
+        ss.last !== undefined ? ss.last.toFixed(4) : '',
+        ss.delta !== undefined ? ss.delta.toFixed(4) : '',
+        ss.pct !== undefined ? ss.pct.toFixed(2) + '%' : ''
+      ];
+      return rowData.join(',');
+    })
+  ].join('\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  link.setAttribute('href', url);
+  link.setAttribute('download', `dca_summary_${cardId}_${timestamp}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('Summary CSV downloaded', 'success');
 }
 
 function setResetZoomButtonsVisible(cardId, visible) {
@@ -8955,7 +9031,7 @@ function addUserLine(cardId, type) {
 
   const name = (type === 'h' ? 'H: ' : 'V: ') + displayVal;
 
-  cardUserLines[cardId].push({ id, type, value, color, name, xType: _ctxMenuCoord.xType });
+  cardUserLines[cardId].push({ id, type, value, color, name, xType: _ctxMenuCoord.xType, lineWidth: 2, lineStyle: 'solid' });
 
   reRenderChart(cardId);
 
@@ -8981,7 +9057,7 @@ function setupLegendColorPicker(cardId, myChart) {
 
     myChart.dispatchAction({ type: 'legendSelect', name: name });
 
-    showLineColorPicker(cardId, line);
+    showLineStylePicker(cardId, line, params.event);
 
   });
 
@@ -8989,28 +9065,30 @@ function setupLegendColorPicker(cardId, myChart) {
 
 
 
-function showLineColorPicker(cardId, line) {
-
+function showLineStylePicker(cardId, line, event) {
   const popup = document.getElementById('lineColorPopup');
+  const colorInput = document.getElementById('lineColorInput');
+  const widthInput = document.getElementById('lineThicknessInput');
+  const styleInput = document.getElementById('lineStyleInput');
 
-  const input = document.getElementById('lineColorInput');
-
-  input.value = rgbToHex(line.color);
+  colorInput.value = rgbToHex(line.color);
+  widthInput.value = line.lineWidth || 2;
+  styleInput.value = line.lineStyle || 'solid';
 
   const chartDiv = document.getElementById('chart-' + cardId);
-
   const rect = chartDiv.getBoundingClientRect();
+  
+  if (event && event.event) {
+    popup.style.left = (event.event.clientX + 10) + 'px';
+    popup.style.top = (event.event.clientY + 10) + 'px';
+  } else {
+    popup.style.left = (rect.left + rect.width / 2 - 80) + 'px';
+    popup.style.top = (rect.top + 30) + 'px';
+  }
 
-  popup.style.left = (rect.left + rect.width / 2 - 80) + 'px';
-
-  popup.style.top = (rect.top + 30) + 'px';
-
-  popup.style.display = 'flex';
-
+  popup.style.display = 'block';
   popup._lineId = line.id;
-
   popup._cardId = cardId;
-
 }
 
 
@@ -9045,7 +9123,12 @@ document.getElementById('lineColorOk').addEventListener('click', function () {
 
   const line = lines.find(l => l.id === popup._lineId);
 
-  if (line) { line.color = document.getElementById('lineColorInput').value; reRenderChart(popup._cardId); }
+  if (line) {
+    line.color = document.getElementById('lineColorInput').value;
+    line.lineWidth = parseInt(document.getElementById('lineThicknessInput').value);
+    line.lineStyle = document.getElementById('lineStyleInput').value;
+    reRenderChart(popup._cardId);
+  }
 
   popup.style.display = 'none';
 
@@ -9516,40 +9599,82 @@ function _axisFit(cardId, axis, chartKey) {
   const activeKey = chartKey || cardId;
   const chart = chartInstances[activeKey], origOpt = cardOptions[cardId];
   if (!chart || !origOpt) return;
-  const setObj = {};
-  if (axis === 'x') {
-    /* For log-scale axes the stored min is a sentinel (0.01) to avoid log(0).
-       Pass null so ECharts auto-fits to the actual data range instead. */
-    const xIsLog = (origOpt.xAxis && origOpt.xAxis.type === 'log');
-    setObj.xAxis = {
-      min: xIsLog ? null : (origOpt.xAxis.min || null),
-      max: xIsLog ? null : (origOpt.xAxis.max || null)
-    };
-    if (cardZoomState[cardId]) { delete cardZoomState[cardId].xMin; delete cardZoomState[cardId].xMax; }
-    if (!cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId] = {};
-    cardAxisAutoFit[cardId].x = true;
-  } else {
-    /* Same sentinel issue for the Y axis in log mode. */
-    const yIsLog = (origOpt.yAxis && origOpt.yAxis.type === 'log');
-    setObj.yAxis = {
-      min: yIsLog ? null : (origOpt.yAxis.min || null),
-      max: yIsLog ? null : (origOpt.yAxis.max || null)
-    };
-    if (cardZoomState[cardId]) { delete cardZoomState[cardId].yMin; delete cardZoomState[cardId].yMax; }
-    if (!cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId] = {};
-    cardAxisAutoFit[cardId].y = true;
+
+  const currentOpt = chart.getOption();
+  const oppAxisKey = (axis === 'x' ? 'yAxis' : 'xAxis');
+  const opp = currentOpt[oppAxisKey][0];
+  const oppMin = opp.min, oppMax = opp.max;
+
+  let fitMin = null, fitMax = null;
+
+  /* Perform local fit if the other axis is constrained (Local Fit) */
+  if (oppMin != null || oppMax != null) {
+      let minV = Infinity, maxV = -Infinity;
+      (currentOpt.series || []).forEach(s => {
+          if (s.type !== 'scatter' && s.type !== 'line') return;
+          if (s.name && (s.name.startsWith('_') || s.name.startsWith('ann_'))) return;
+          const data = s.data || [];
+          for (let i = 0; i < data.length; i++) {
+              const pt = data[i]; if (!pt || pt[1] == null) continue;
+              const x = pt[0], y = pt[1];
+              const b = (axis === 'x' ? y : x), t = (axis === 'x' ? x : y);
+              if ((oppMin == null || b >= oppMin) && (oppMax == null || b <= oppMax)) {
+                  if (t < minV) minV = t; if (t > maxV) maxV = t;
+              }
+          }
+      });
+      if (minV !== Infinity) {
+          const span = maxV - minV;
+          const pad = span * 0.04 || (span === 0 ? 0.1 : 0);
+          fitMin = minV - pad; fitMax = maxV + pad;
+      }
   }
+
+  const setObj = {};
+  if (!cardZoomState[cardId]) cardZoomState[cardId] = {};
+  if (!cardAxisAutoFit[cardId]) cardAxisAutoFit[cardId] = {};
+
+  if (axis === 'x') {
+    const isLog = (origOpt.xAxis && origOpt.xAxis.type === 'log');
+    if (fitMin !== null && isLog && fitMin <= 0) fitMin = 0.01;
+    const mn = fitMin !== null ? fitMin : (isLog ? null : (origOpt.xAxis.min || null));
+    const mx = fitMax !== null ? fitMax : (isLog ? null : (origOpt.xAxis.max || null));
+    setObj.xAxis = { min: mn, max: mx };
+    if (fitMin !== null) {
+      cardZoomState[cardId].xMin = mn; cardZoomState[cardId].xMax = mx;
+      cardAxisAutoFit[cardId].x = false;
+    } else {
+      delete cardZoomState[cardId].xMin; delete cardZoomState[cardId].xMax;
+      cardAxisAutoFit[cardId].x = true;
+    }
+  } else {
+    const isLog = (origOpt.yAxis && origOpt.yAxis.type === 'log');
+    if (fitMin !== null && isLog && fitMin <= 0) fitMin = 0.01;
+    const mn = fitMin !== null ? fitMin : (isLog ? null : (origOpt.yAxis.min || null));
+    const mx = fitMax !== null ? fitMax : (isLog ? null : (origOpt.yAxis.max || null));
+    setObj.yAxis = { min: mn, max: mx };
+    if (fitMin !== null) {
+      cardZoomState[cardId].yMin = mn; cardZoomState[cardId].yMax = mx;
+      cardAxisAutoFit[cardId].y = false;
+    } else {
+      delete cardZoomState[cardId].yMin; delete cardZoomState[cardId].yMax;
+      cardAxisAutoFit[cardId].y = true;
+    }
+  }
+
   chart.setOption(setObj);
   const fullId = 'fullChart-' + cardId;
   const miniChart = chartInstances[cardId];
   const fullChart = chartInstances[fullId];
   if (chart === miniChart && fullChart) fullChart.setOption(setObj);
   if (chart === fullChart && miniChart) miniChart.setOption(setObj);
-  /* Hide reset button if no zoom remaining */
+
   const z = cardZoomState[cardId];
   if (!z || (z.xMin == null && z.xMax == null && z.yMin == null && z.yMax == null)) {
-    delete cardZoomState[cardId];
-    setResetZoomButtonsVisible(cardId, false);
+      delete cardZoomState[cardId];
+      setResetZoomButtonsVisible(cardId, false);
+  } else {
+      setResetZoomButtonsVisible(cardId, true);
   }
 }
 
@@ -12459,7 +12584,7 @@ function setupUserLineDrag(cardId, myChart) {
         const sOpt = {};
         const newSeries = opt.series.map((s, i) => {
           if (i !== dragging.seriesIdx) return s;
-          const mlDataItem = line.type === 'h' ? { yAxis: line.value } : { xAxis: isDate ? Math.round(line.value) : line.value };
+          const mlDataItem = line.type === 'h' ? { yAxis: line.value, name: line.name } : { xAxis: isDate ? Math.round(line.value) : line.value, name: line.name };
           return Object.assign({}, s, {
             name: line.name,
             markLine: Object.assign({}, s.markLine, {
@@ -12472,7 +12597,7 @@ function setupUserLineDrag(cardId, myChart) {
       }
       return;
     }
-    const mlDataItem = line.type === 'h' ? { yAxis: line.value } : { xAxis: isDate ? Math.round(line.value) : line.value };
+    const mlDataItem = line.type === 'h' ? { yAxis: line.value, name: line.name } : { xAxis: isDate ? Math.round(line.value) : line.value, name: line.name };
     const newSeries = opt.series.map((s, i) => {
       if (i !== idx) return s;
       return Object.assign({}, s, {
