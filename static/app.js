@@ -1586,22 +1586,28 @@ function populateCardColumnSelectors(cardId, presetX, presetY, presetWellCol, pr
   selWellCol.innerHTML = '<option value="">— select —</option>';
   if (selGroupCol) selGroupCol.innerHTML = '<option value="">— none —</option>';
 
+  // Sort helpers
+  const sortAlpha = (arr) => [...arr].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+  const sortedNums = sortAlpha(numericColumns);
+  const catCols = uploadedColumns.filter(c => !numericColumns.includes(c));
+  const sortedCats = sortAlpha(catCols);
+
   // X: all columns (numeric first, then categorical)
-  [...numericColumns, ...uploadedColumns.filter(c => !numericColumns.includes(c))].forEach(c => {
+  [...sortedNums, ...sortedCats].forEach(c => {
     selX.innerHTML += `<option value="${c}">${c}</option>`;
   });
   // Y: numeric columns
-  numericColumns.forEach(c => {
+  sortedNums.forEach(c => {
     selY.innerHTML += `<option value="${c}">${c}</option>`;
   });
   // Well column: categorical first, then numeric
-  const catCols = uploadedColumns.filter(c => !numericColumns.includes(c));
-  [...catCols, ...numericColumns].forEach(c => {
+  [...sortedCats, ...sortedNums].forEach(c => {
     selWellCol.innerHTML += `<option value="${c}">${c}</option>`;
   });
   // Group By: all columns (categorical first)
   if (selGroupCol) {
-    [...catCols, ...numericColumns].forEach(c => {
+    [...sortedCats, ...sortedNums].forEach(c => {
       selGroupCol.innerHTML += `<option value="${c}">${c}</option>`;
     });
   }
@@ -1739,25 +1745,8 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       </div>
 
-      <div class="control-group"><label>Model</label>
-
-        <select class="p-model">
-
-          <option value="exponential" ${(presetModel || '') === 'exponential' ? 'selected' : ''}>Exponential</option>
-
-          <option value="hyperbolic" ${presetModel === 'hyperbolic' ? 'selected' : ''}>Hyperbolic</option>
-
-          <option value="harmonic" ${presetModel === 'harmonic' ? 'selected' : ''}>Harmonic</option>
-
-        </select>
-
-      </div>
-
-      <div class="control-group"><label>Forecast (months)</label><input type="number" class="p-forecast" value="${presetForecast || 0}" min="0" style="width:100px;" onchange="onGlobalForecastChange('${cardId}')"></div>
-
-      <div class="control-group"><label>X Labels</label><input type="number" class="p-xlabels" value="8" min="2" max="50" style="width:70px;"></div>
-
-      <div class="control-group"><label>Title</label><input type="text" class="p-title" value="${presetTitle || ''}" placeholder="Auto (well name)" style="width:150px;"></div>
+      <input type="hidden" class="p-model" value="${presetModel || 'exponential'}">
+      <input type="hidden" class="p-forecast" value="${presetForecast || 0}">
 
       <div class="control-group"><label>&nbsp;</label>
         <div style="display:flex;gap:4px;">
@@ -1771,6 +1760,19 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
     <div class="style-panel" id="style-${cardId}">
       <div class="style-curves-container" id="styleCurves-${cardId}">
       </div>
+
+      <div class="style-section">
+        <div class="style-section-title">Layout</div>
+        <div class="style-row">
+          <span class="style-label">Chart Title</span>
+          <input type="text" class="p-title" value="${presetTitle || ''}" placeholder="Auto (well name)" style="width:100%;">
+        </div>
+        <div class="style-row">
+          <span class="style-label">X Axis Labels</span>
+          <input type="number" class="p-xlabels" value="8" min="2" max="50" style="width:100%;">
+        </div>
+      </div>
+
       <div class="style-section">
         <div class="style-row">
           <span class="style-label">Actual Pts</span>
@@ -2537,7 +2539,7 @@ function readCardStyles(cardId) {
       fittedLine: q('sc-fitted-line')?.checked !== false,
       fittedStyle: q('sc-fitted-style')?.value || 'solid',
       fittedWidth: parseInt(q('sc-fitted-width')?.value || '2'),
-      fittedMarkers: q('sc-fitted-markers')?.checked || false,
+      fittedMarkers: q('sc-fitted-markers')?.checked !== false,
       fittedLabels: q('sc-fitted-labels')?.checked || false,
       fittedSymbol: q('sc-fitted-symbol')?.value || 'triangle',
       fittedSymbolSize: parseInt(q('sc-fitted-msize')?.value || '14'),
@@ -2545,20 +2547,20 @@ function readCardStyles(cardId) {
       forecastLine: q('sc-fitted-line')?.checked !== false,
       forecastStyle: q('sc-fitted-style')?.value || 'solid',
       forecastWidth: parseInt(q('sc-fitted-width')?.value || '2'),
-      forecastMarkers: q('sc-fitted-markers')?.checked || false,
+      forecastMarkers: q('sc-fitted-markers')?.checked !== false,
       forecastLabels: q('sc-fitted-labels')?.checked || false,
       forecastSymbol: q('sc-fitted-symbol')?.value || 'triangle',
       forecastSymbolSize: parseInt(q('sc-fitted-msize')?.value || '14'),
       p10Color: q('sc-p10-color')?.value || '#22c55e',
       p10Line: q('sc-p10-line')?.checked !== false,
-      p10Marker: q('sc-p10-marker')?.checked || false,
+      p10Marker: q('sc-p10-marker')?.checked !== false,
       p10Labels: q('sc-p10-labels')?.checked || false,
       p10Style: q('sc-p10-style')?.value || 'solid',
       p10Symbol: q('sc-p10-symbol')?.value || 'circle',
       p10SymbolSize: parseInt(q('sc-p10-msize')?.value || '6'),
       p90Color: q('sc-p90-color')?.value || '#ef4444',
       p90Line: q('sc-p90-line')?.checked !== false,
-      p90Marker: q('sc-p90-marker')?.checked || false,
+      p90Marker: q('sc-p90-marker')?.checked !== false,
       p90Labels: q('sc-p90-labels')?.checked || false,
       p90Style: q('sc-p90-style')?.value || 'solid',
       p90Symbol: q('sc-p90-symbol')?.value || 'circle',
@@ -2635,27 +2637,27 @@ function readCardStyles(cardId) {
     fittedColor: first.fittedColor || '#f59e0b',
     fittedStyle: first.fittedStyle || 'solid',
     fittedWidth: first.fittedWidth != null ? first.fittedWidth : 2,
-    fittedMarkers: first.fittedMarkers || false,
+    fittedMarkers: first.fittedMarkers !== false,
     fittedLabels: first.fittedLabels || false,
     fittedSymbol: first.fittedSymbol || 'triangle',
     fittedSymbolSize: first.fittedSymbolSize != null ? first.fittedSymbolSize : 14,
     forecastColor: first.forecastColor || '#22c55e',
     forecastStyle: first.forecastStyle || 'dashed',
     forecastWidth: first.forecastWidth != null ? first.forecastWidth : 3,
-    forecastMarkers: first.forecastMarkers || false,
+    forecastMarkers: first.forecastMarkers !== false,
     forecastLabels: first.forecastLabels || false,
     forecastSymbol: first.forecastSymbol || 'triangle',
     forecastSymbolSize: first.forecastSymbolSize != null ? first.forecastSymbolSize : 14,
     p10Color: first.p10Color || '#22c55e',
     p10Line: first.p10Line !== false,
-    p10Marker: first.p10Marker || false,
+    p10Marker: first.p10Marker !== false,
     p10Labels: first.p10Labels || false,
     p10Style: first.p10Style || 'solid',
     p10Symbol: first.p10Symbol || 'circle',
     p10SymbolSize: first.p10SymbolSize != null ? first.p10SymbolSize : 6,
     p90Color: first.p90Color || '#ef4444',
     p90Line: first.p90Line !== false,
-    p90Marker: first.p90Marker || false,
+    p90Marker: first.p90Marker !== false,
     p90Labels: first.p90Labels || false,
     p90Style: first.p90Style || 'solid',
     p90Symbol: first.p90Symbol || 'circle',
@@ -2782,7 +2784,7 @@ function removeCard(id) {
 
    ==================================================================== */
 
-async function runSingleDCA(cardId) {
+async function runSingleDCA(cardId, plotOnly = true) {
 
   const card = document.getElementById(cardId);
 
@@ -2790,9 +2792,9 @@ async function runSingleDCA(cardId) {
 
   const well = selectedWells.join(',');
 
-  const model = card.querySelector('.p-model').value;
+  const model = card.querySelector('.p-model')?.value || 'exponential';
 
-  const months = card.querySelector('.p-forecast').value;
+  const months = card.querySelector('.p-forecast')?.value || '0';
 
   const combine = isCombineMode(cardId);
 
@@ -2840,7 +2842,7 @@ async function runSingleDCA(cardId) {
 
   try {
 
-    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}&combine=${combine}&combine_func=${enc(combineAgg)}&group_col=${enc(groupCol)}`;
+    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}&combine=${combine}&combine_func=${enc(combineAgg)}&group_col=${enc(groupCol)}&plot_only=${plotOnly}`;
 
     const res = await fetch(url);
 
@@ -2906,6 +2908,69 @@ async function runSingleDCA(cardId) {
 
   finally { btn.innerHTML = 'Plot'; btn.disabled = false; }
 
+}
+
+
+/* Fit curve to all data points — called from chart right-click menu.
+   Similar to runSingleDCA but does NOT pass plot_only, so the server
+   performs full DCA curve fitting and returns fitted values + forecast. */
+async function fitCurveToAllPoints(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+
+  const selectedWells = getSelectedWells(cardId);
+  const well = selectedWells.join(',');
+  const model = card.querySelector('.p-model')?.value || 'exponential';
+  const months = card.querySelector('.p-forecast')?.value || '0';
+  const combine = isCombineMode(cardId);
+  const combineAgg = getCombineAggMode(cardId);
+  if (!well) { customAlert('Please select at least one well.'); return; }
+
+  const xVal = card.querySelector('.p-selX')?.value || '';
+  const yVal = card.querySelector('.p-selY')?.value || '';
+  const wellCol = card.querySelector('.p-selWellCol')?.value || '';
+  const groupCol = card.querySelector('.p-groupCol')?.value || '';
+  if (!xVal || !yVal || !wellCol) { customAlert('Please select X Axis, Y Axis, and Well Column on this card.'); return; }
+
+  /* If there's no data loaded yet, run full DCA from scratch */
+  const data = cardLastData[cardId];
+  if (!data || !data.wells || data.wells.length === 0) {
+    showToast('Please plot data first before fitting a curve.', 'warning');
+    return;
+  }
+
+  const excl = cardExclusions[cardId] || new Set();
+  const exclStr = [...excl].join(',');
+
+  showToast('Fitting curve to all data points…', 'info', 2000);
+
+  try {
+    const url = `/api/dca?x=${enc(xVal)}&y=${enc(yVal)}&well_col=${enc(wellCol)}&wells=${enc(well)}&model=${enc(model)}&forecast_months=${months}&exclude_indices=${enc(exclStr)}&combine=${combine}&combine_func=${enc(combineAgg)}&group_col=${enc(groupCol)}`;
+
+    const res = await fetch(url);
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.detail || 'Error');
+
+    cardLastData[cardId] = result;
+
+    /* Snapshot main curve original params for reset capability */
+    if (result.wells) {
+      result.wells.forEach(function (w) { if (w.params) _saveOriginalParams(cardId, 'main', w.params); });
+    }
+
+    rebuildCurveStyleSections(cardId);
+    cardStyles[cardId] = readCardStyles(cardId);
+
+    if (cardZoomState[cardId]) {
+      delete cardZoomState[cardId].xMax;
+    }
+
+    updateForecastOnly(cardId);
+    showToast('Curve fitted successfully', 'success', 2000);
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+  } catch (err) {
+    customAlert(err.message);
+  }
 }
 
 
@@ -3053,7 +3118,7 @@ function toggleExclusion(cardId, index) {
   if (_w0 && _w0.qi_anchor_indices && _w0.qi_anchor_indices.length > 0) {
     refitCurrentData(cardId);
   } else {
-    runSingleDCA(cardId);
+    runSingleDCA(cardId, false);
   }
 
 }
@@ -6507,7 +6572,7 @@ function fitSelectionOnly(cardId, chart, selRect) {
   if (w.qi_anchor_indices && w.qi_anchor_indices.length > 0) {
     refitCurrentData(cardId);
   } else {
-    runSingleDCA(cardId);
+    runSingleDCA(cardId, false);
   }
 
 }
@@ -6582,7 +6647,7 @@ function excludeSelection(cardId, chart, selRect) {
   if (w.qi_anchor_indices && w.qi_anchor_indices.length > 0) {
     refitCurrentData(cardId);
   } else {
-    runSingleDCA(cardId);
+    runSingleDCA(cardId, false);
   }
 
 }
@@ -6857,7 +6922,7 @@ async function changeMainFitModel(cardId, newModel) {
   const modelSel = card.querySelector('.p-model');
   if (modelSel) modelSel.value = newModel;
   /* Trigger a re-fit by calling runSingleDCA */
-  await runSingleDCA(cardId);
+  await runSingleDCA(cardId, false);
 }
 
 /* Dispatcher: change model for any curve type */
@@ -7166,7 +7231,7 @@ function updateMultiFitPanel(cardId) {
     const curveIdAttr = c.type === 'main' ? c.wellName : c.id;
     const forecastHtml = '<label class="mf-forecast-label" title="Forecast months for this curve">'
       + '<span>Forecast:</span>'
-      + '<input type="number" class="mf-forecast-input" min="0" data-curve-type="' + c.type + '" data-curve-id="' + curveIdAttr + '" value="' + (curForecastVal || 0) + '" style="width:52px;margin-left:3px;" onchange="onPerCurveForecastChange(\'' + cardId + '\', this)">'
+      + '<input type="number" class="mf-forecast-input" min="0" data-curve-type="' + c.type + '" data-curve-id="' + curveIdAttr + '" value="' + (curForecastVal || 0) + '" style="margin-left:3px;" onchange="onPerCurveForecastChange(\'' + cardId + '\', this)">'
       + '</label>';
 
     html += '<div class="mf-item' + hiddenCls + '">'
@@ -7561,7 +7626,7 @@ function applyTemplate(tplId) {
     showToast('Template "' + tpl.name + '" applied', 'success', 3000);
   } else {
     // No cached data – run the DCA
-    runSingleDCA(cardId);
+    runSingleDCA(cardId, false);
     showToast('Template "' + tpl.name + '" applied – running DCA...', 'info', 3000);
   }
 
@@ -7990,7 +8055,7 @@ async function anchorRemovePoint() {
     await refitCurrentData(cardId);
   } else {
     /* No more anchors — normal server-side DCA */
-    runSingleDCA(cardId);
+    runSingleDCA(cardId, false);
   }
 }
 
@@ -8464,7 +8529,7 @@ function multiPointMenuApply(action, curveType, curveId) {
     if (w0 && w0.qi_anchor_indices && w0.qi_anchor_indices.length > 0) {
       refitCurrentData(cardId);
     } else {
-      runSingleDCA(cardId);
+      runSingleDCA(cardId, false);
     }
   }
 }
@@ -8839,6 +8904,8 @@ document.querySelectorAll('#chartCtxMenu > .ccm-item[data-action]').forEach(item
     else if (action === 'log-scale-x') toggleLogScaleX(_ctxMenuCardId);
 
     else if (action === 'set-qi') setQiAtPoint(_ctxMenuCardId);
+
+    else if (action === 'fit-all') fitCurveToAllPoints(_ctxMenuCardId);
 
     hideChartCtxMenu();
 
@@ -10628,10 +10695,10 @@ async function loadWorkspaceFromFile() {
             renderSingleChart(newId, savedData, cs.forecast);
           } catch (e) {
             console.warn('Failed to render saved chart for', newId, e);
-            if (serverHasData) await runSingleDCA(newId);
+            if (serverHasData) await runSingleDCA(newId, false);
           }
         } else if (serverHasData) {
-          await runSingleDCA(newId);
+          await runSingleDCA(newId, false);
         }
 
         activePageId = savedPage;
@@ -11528,7 +11595,7 @@ function populateWellPicker(cardId, selectedWells, customWellsList) {
 
   list.innerHTML = '';
 
-  const wells = customWellsList || allWells;
+  const wells = [...(customWellsList || allWells)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
   wells.forEach(w => {
 

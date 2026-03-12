@@ -1519,6 +1519,7 @@ button.btn-sm {
   color: var(--text);
   font-size: .72rem;
   padding: 2px 4px;
+  width: 70px;
   outline: none;
   transition: border-color .15s;
 }

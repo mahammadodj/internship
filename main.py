@@ -796,12 +796,14 @@ async def decline_curve_analysis(
     combine: bool = Query(False, description="If true, sum y-values of selected wells by time period"),
     combine_func: str = Query("sum", description="Combine aggregation: sum|mean|median|min|max"),
     group_col: str = Query("", description="Optional grouping column. When set, each 'well' value is a group value from this column; rows matching the group value are aggregated by x."),
+    plot_only: bool = Query(False, description="If true, return raw x/y scatter data without fitting a curve"),
 ):
     """
     Perform Decline Curve Analysis.
     Returns actual production data + fitted decline curves per well + forecast.
     If combine=true, aggregates y-values of all selected wells grouped by the x column
     and returns a single combined "well" for DCA.
+    If plot_only=true, only returns raw x/y data without fitting.
     """
     if _current_df is None:
         raise HTTPException(status_code=404, detail="No dataset loaded yet.")
@@ -901,6 +903,23 @@ async def decline_curve_analysis(
             x_min_val = None
 
         y_vals = pd.to_numeric(subset[y], errors='coerce').fillna(0.0).values.astype(float)
+
+        # --- Plot-only mode: return raw data without curve fitting ---
+        if plot_only:
+            entry = {
+                "well": well_name,
+                "x": x_display,
+                "t": t.tolist(),
+                "y_actual": y_vals.tolist(),
+                "y_fitted": None,
+                "forecast": {},
+                "params": {},
+                "equation": "",
+                "is_date": is_date,
+                "excluded_indices": sorted(excl),
+            }
+            result.append(entry)
+            continue
 
         t_fit = t[fit_mask]
         y_fit = y_vals[fit_mask]
