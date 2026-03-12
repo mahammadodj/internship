@@ -3851,9 +3851,12 @@ function setupPCurveDragHandles(cardId, myChart) {
 
   function onMouseUp() {
     if (dragging) {
-      // Re-render to ensure all tables and panels (like 'All Curves' reset button) reflect the changed params
-      saveZoomState(cardId);
-      renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+      // Re-render to ensure all tables and panels reflect the changed params.
+      // We use setTimeout to allow ECharts to finish its current event cycle before we dispose/re-init.
+      setTimeout(() => {
+        saveZoomState(cardId);
+        renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+      }, 0);
       
       dragging = null;
       _curveDragging = false;
@@ -4267,14 +4270,16 @@ function setupQiDragHandle(cardId, myChart) {
       myChart.getDom().style.cursor = '';
 
       // Force a full re-render to sync tables (All Curves panel) and other views
-      saveZoomState(cardId);
-      renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
-
-      const fullId = 'fullChart-' + cardId;
-      const otherChart = myChart === chartInstances[fullId] ? chartInstances[cardId] : chartInstances[fullId];
-      if (otherChart) {
+      setTimeout(() => {
+        saveZoomState(cardId);
         renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
-      }
+
+        const fullId = 'fullChart-' + cardId;
+        const otherChart = myChart === chartInstances[fullId] ? chartInstances[cardId] : chartInstances[fullId];
+        if (otherChart) {
+          renderSingleChart(cardId, cardLastData[cardId], document.getElementById(cardId)?.querySelector('.p-forecast')?.value || 0);
+        }
+      }, 0);
     }
   }
 
@@ -4845,7 +4850,16 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
 
 
-  if (chartInstances[cardId]) chartInstances[cardId].dispose();
+  const oldChart = chartInstances[cardId];
+  if (oldChart) {
+    // Explicitly call all registered cleanup handlers to remove zr listeners, etc.
+    Object.keys(oldChart).forEach(key => {
+      if (key.endsWith('Cleanup') && typeof oldChart[key] === 'function') {
+        try { oldChart[key](); } catch (e) { console.warn('Cleanup failed for', key, e); }
+      }
+    });
+    oldChart.dispose();
+  }
 
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 
@@ -12749,7 +12763,10 @@ function setupUserLineDrag(cardId, myChart) {
     _curveDragging = false;
 
     // Full re-render to finalize position and sync all state
-    reRenderChart(cardId);
+    // We use setTimeout to allow ECharts to finish its current event cycle before we dispose/re-init.
+    setTimeout(() => {
+      reRenderChart(cardId);
+    }, 0);
 
   }
 
@@ -12924,8 +12941,10 @@ function setupAnnotationDrag(cardId, myChart) {
     _annDragging = false;
     if (wasMoved) {
       _annDragSuppressClick = true;
-      setTimeout(function () { _annDragSuppressClick = false; }, 200);
-      reRenderChart(cardId);
+      setTimeout(function () {
+        _annDragSuppressClick = false;
+        reRenderChart(cardId);
+      }, 200);
     }
   }
 
