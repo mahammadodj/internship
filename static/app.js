@@ -2979,7 +2979,7 @@ async function fitCurveToAllPoints(cardId) {
 
 /* Rebuild forecast for the main curve (and multi-fit curves) client-side
    without re-fitting. Called when only forecast months changes. */
-function updateForecastOnly(cardId) {
+function updateForecastOnly(cardId, preserveZoom = false) {
   const data = cardLastData[cardId];
   if (!data || !data.wells || data.wells.length === 0) return;
 
@@ -3097,7 +3097,7 @@ function updateForecastOnly(cardId) {
   });
 
   saveZoomState(cardId);
-  if (cardZoomState[cardId]) {
+  if (!preserveZoom && cardZoomState[cardId]) {
     delete cardZoomState[cardId].xMax;
   }
   renderSingleChart(cardId, data, originalGlobalForecast); 
@@ -6909,7 +6909,7 @@ async function _performMultiFit(cardId, indices, modelOverride) {
 
     // Re-render chart and update management panel
     saveZoomState(cardId);
-    updateForecastOnly(cardId);
+    updateForecastOnly(cardId, true);
     updateMultiFitPanel(cardId);
 
     const fmt = (v) => typeof v === 'number' ? v.toFixed(4) : v;
@@ -6993,7 +6993,7 @@ async function changeMultiFitModel(cardId, mfId, newModel) {
 
     rebuildCurveStyleSections(cardId);
     saveZoomState(cardId);
-    updateForecastOnly(cardId);
+    updateForecastOnly(cardId, true);
     updateMultiFitPanel(cardId);
 
     const fmt = (v) => typeof v === 'number' ? v.toFixed(4) : v;
@@ -8500,7 +8500,7 @@ async function refitMultiFitCurveIndices(cardId, mfId) {
 
     rebuildCurveStyleSections(cardId);
     saveZoomState(cardId);
-    updateForecastOnly(cardId);
+    updateForecastOnly(cardId, true);
     updateMultiFitPanel(cardId);
 
     const fmt = function (v) { return typeof v === 'number' ? v.toFixed(4) : v; };
