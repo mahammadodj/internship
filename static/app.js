@@ -156,6 +156,7 @@ let _pointMenuIdx = null;
 let _pointMenuJustOpened = false;
 
 const cardCtrlSelected = {};      // cardId -> Set<index> for Ctrl+click multi-select
+const cardWellStates = {};        // { cardId: { wellKey: { multiFits, exclusions, hiddenSeries, originalParams, curveStyles, userLines, annotations } } }
 const cardMultiFits = {};         // cardId -> Array<{id, model, params, equation, indices:[], color, fittedData:[[x,y],...], forecastData:[[x,y],...]}>  
 const cardHiddenSeries = {};      // cardId -> Set<seriesName> of manually removed series
 const cardActiveCurveStyle = {};  // cardId -> 'well:wellName' or 'mf:id' identifying the visible style section
@@ -1828,6 +1829,12 @@ function addPlotCard(presetWell, presetModel, presetForecast, presetTitle, prese
 
       </div>
 
+      <div class="nav-title-overlay" id="navTitle-${cardId}" style="display:none; position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:10; pointer-events:none; align-items:center; gap:12px;">
+         <span class="nav-btn" onclick="navWell('${cardId}', -1)" style="pointer-events:auto; cursor:pointer; font-weight:bold; font-size:1.4rem; color:var(--text); opacity:0.6; padding:0 8px; user-select:none; transition: opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">&lt;</span>
+         <span class="nav-title-text" id="navTitleText-${cardId}" style="pointer-events:auto; font-weight:bold; font-size:15px; color:var(--text); text-align:center;"></span>
+         <span class="nav-btn" onclick="navWell('${cardId}', 1)" style="pointer-events:auto; cursor:pointer; font-weight:bold; font-size:1.4rem; color:var(--text); opacity:0.6; padding:0 8px; user-select:none; transition: opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">&gt;</span>
+      </div>
+
       <div class="mini-chart" id="chart-${cardId}"></div>
 
       <div class="formula-display" id="formula-${cardId}" style="display:none;"></div>
@@ -2804,6 +2811,49 @@ async function runSingleDCA(cardId, plotOnly = true) {
   const combineAgg = getCombineAggMode(cardId);
 
   if (!well) { customAlert('Please select at least one well.'); return; }
+
+  const newWellKey = [...selectedWells].sort().join(',');
+  let oldWellKey = null;
+  if (cardLastData[cardId] && cardLastData[cardId].wells) {
+      oldWellKey = cardLastData[cardId].wells.map(w => w.well).sort().join(',');
+  }
+
+  if (oldWellKey && oldWellKey !== newWellKey) {
+      if (!cardWellStates[cardId]) cardWellStates[cardId] = {};
+      
+      cardWellStates[cardId][oldWellKey] = {
+          multiFits: cardMultiFits[cardId] ? JSON.parse(JSON.stringify(cardMultiFits[cardId])) : [],
+          exclusions: cardExclusions[cardId] ? Array.from(cardExclusions[cardId]) : [],
+          hiddenSeries: cardHiddenSeries[cardId] ? Array.from(cardHiddenSeries[cardId]) : [],
+          originalParams: cardOriginalParams[cardId] ? JSON.parse(JSON.stringify(cardOriginalParams[cardId])) : {},
+          curveStyles: cardStyles[cardId] && cardStyles[cardId].curveStyles ? JSON.parse(JSON.stringify(cardStyles[cardId].curveStyles)) : {},
+          userLines: cardUserLines[cardId] ? JSON.parse(JSON.stringify(cardUserLines[cardId])) : [],
+          annotations: cardAnnotations[cardId] ? JSON.parse(JSON.stringify(cardAnnotations[cardId])) : []
+      };
+
+      const ns = cardWellStates[cardId][newWellKey] || null;
+      if (ns) {
+          cardMultiFits[cardId] = JSON.parse(JSON.stringify(ns.multiFits));
+          cardExclusions[cardId] = new Set(ns.exclusions);
+          cardHiddenSeries[cardId] = new Set(ns.hiddenSeries);
+          cardOriginalParams[cardId] = JSON.parse(JSON.stringify(ns.originalParams));
+          if (!cardStyles[cardId]) cardStyles[cardId] = getDefaultStyles();
+          cardStyles[cardId].curveStyles = JSON.parse(JSON.stringify(ns.curveStyles));
+          cardUserLines[cardId] = JSON.parse(JSON.stringify(ns.userLines));
+          cardAnnotations[cardId] = JSON.parse(JSON.stringify(ns.annotations));
+      } else {
+          delete cardMultiFits[cardId];
+          cardExclusions[cardId] = new Set();
+          cardHiddenSeries[cardId] = new Set();
+          delete cardOriginalParams[cardId];
+          if (cardStyles[cardId]) delete cardStyles[cardId].curveStyles;
+          delete cardUserLines[cardId];
+          delete cardAnnotations[cardId];
+      }
+      
+      delete cardActiveCurveStyle[cardId];
+  }
+
 
   // If there are pending Ctrl-selected points, auto-include them (remove from exclusions)
   // so that "select more points → click Plot" naturally adds them to the fit
@@ -5537,15 +5587,7 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
     graphic: graphicElems,
 
-    title: {
-
-      text: chartTitle,
-
-      left: 'center',
-
-      textStyle: { color: ttC, fontSize: 15, fontWeight: 'bold' }
-
-    },
+    title: { show: false },
 
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'cross', lineStyle: { color: 'var(--text-dim, #999)', type: 'dashed' } }, formatter: function (params) {
@@ -5839,7 +5881,24 @@ function renderSingleChart(cardId, data, forecastMonths) {
 
   setupAxisDragHandles(cardId, myChart);
 
-
+  /* Update custom HTML title overlay */
+  const navOverlay = document.getElementById('navTitle-' + cardId);
+  if (navOverlay) {
+    const titleTextSpan = document.getElementById('navTitleText-' + cardId);
+    if (titleTextSpan) {
+      titleTextSpan.textContent = chartTitle;
+      titleTextSpan.style.color = ttC;
+    }
+    const wp = document.getElementById('wp-' + cardId);
+    let totalWells = 0;
+    if (wp) {
+      totalWells = wp.querySelectorAll('.well-picker-item input[type="checkbox"]').length;
+    }
+    const navBtns = navOverlay.querySelectorAll('.nav-btn');
+    const showBtns = (isSingle && totalWells > 1);
+    navBtns.forEach(b => b.style.display = showBtns ? '' : 'none');
+    navOverlay.style.display = 'flex';
+  }
 
   // Populate data table with sorting support
 
@@ -13481,5 +13540,26 @@ function showHeaderSettingsPopup(cardId, mx, my) {
     }
   };
   setTimeout(() => document.addEventListener('mousedown', onClickOutside), 10);
+}
+
+function navWell(cardId, direction) {
+  const wp = document.getElementById('wp-' + cardId);
+  if (!wp) return;
+  const checkboxes = Array.from(wp.querySelectorAll('.well-picker-item input[type="checkbox"]'));
+  const checkedBoxes = checkboxes.filter(cb => cb.checked);
+  if (checkedBoxes.length !== 1) return;
+  const cb = checkedBoxes[0];
+  const idx = checkboxes.indexOf(cb);
+  let newIdx = idx + direction;
+  if (newIdx < 0) newIdx = checkboxes.length - 1;
+  if (newIdx >= checkboxes.length) newIdx = 0;
+  
+  if (newIdx >= 0 && newIdx < checkboxes.length) {
+    cb.checked = false;
+    checkboxes[newIdx].checked = true;
+    if (typeof updateWellPickerDisplay === 'function') updateWellPickerDisplay(cardId);
+    if (typeof runSingleDCA === 'function') runSingleDCA(cardId);
+    if (typeof _debouncedAutoSave === 'function') _debouncedAutoSave();
+  }
 }
 
